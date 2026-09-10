@@ -11,6 +11,7 @@ import '../../data/models/device_info.dart';
 import '../../providers/discovery_provider.dart';
 import '../../providers/server_provider.dart';
 import '../../providers/services_provider.dart';
+import '../shared/empty_state.dart';
 
 class DevicesPage extends ConsumerWidget {
   const DevicesPage({super.key});
@@ -36,23 +37,11 @@ class DevicesPage extends ConsumerWidget {
   }
 
   Widget _buildBody(BuildContext context, List<DeviceInfo> devices, WidgetRef ref) {
-    final palette = AppPalette.of(context);
     if (devices.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.tablet, size: 72, color: palette.muted),
-            const SizedBox(height: AppSpacing.lg),
-            Text('未发现局域网设备', style: TextStyle(color: palette.muted)),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              '确保两台设备在同一 Wi-Fi 下，\n或使用「手动连接」输入 IP 地址。',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: palette.muted, fontSize: 13),
-            ),
-          ],
-        ),
+      return const EmptyState(
+        icon: LucideIcons.tablet,
+        title: '未发现局域网设备',
+        subtitle: '确保两台设备在同一 Wi-Fi 下，\n或使用「手动连接」输入 IP 地址。',
       );
     }
     return ListView.builder(

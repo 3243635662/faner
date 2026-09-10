@@ -16,11 +16,15 @@ class DetailPanel extends StatelessWidget {
     required this.entry,
     required this.resolver,
     required this.isRemote,
+    required this.onOpenFullscreen,
   });
 
   final FileEntry? entry;
   final String Function(FileEntry) resolver;
   final bool isRemote;
+
+  /// 全屏打开媒体（由父级构造完整同类型列表并 push 全屏路由）。
+  final void Function(FileEntry entry) onOpenFullscreen;
 
   @override
   Widget build(BuildContext context) {
@@ -66,13 +70,18 @@ class DetailPanel extends StatelessWidget {
           ),
         );
       case EntryType.image:
-        return ImageView(source: mediaSourceFor(entry, resolver, isRemote));
+        return ImageView(
+          source: mediaSourceFor(entry, resolver, isRemote),
+          onFullscreen: () => onOpenFullscreen(entry),
+        );
       case EntryType.video:
         return Center(
           child: VideoView(
             items: [mediaSourceFor(entry, resolver, isRemote)],
             initialIndex: 0,
             embedded: true,
+            fullscreen: false,
+            onToggleFullscreen: () => onOpenFullscreen(entry),
           ),
         );
       case EntryType.audio:

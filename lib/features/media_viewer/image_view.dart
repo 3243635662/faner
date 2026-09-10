@@ -8,9 +8,12 @@ import 'media_source.dart';
 
 /// 可复用的图片查看器：手势缩放 + 点击空白区域退出。
 class ImageView extends StatefulWidget {
-  const ImageView({super.key, required this.source});
+  const ImageView({super.key, required this.source, this.onFullscreen});
 
   final MediaSource source;
+
+  /// 全屏按钮回调；null 时不显示全屏按钮（独立全屏页）。
+  final VoidCallback? onFullscreen;
 
   @override
   State<ImageView> createState() => _ImageViewState();
@@ -47,7 +50,7 @@ class _ImageViewState extends State<ImageView> {
           errorBuilder: (_, _, _) => _error(palette),
         ),
     };
-    return GestureDetector(
+    final viewer = GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTapUp: _handleTapUp,
       child: InteractiveViewer(
@@ -60,6 +63,25 @@ class _ImageViewState extends State<ImageView> {
           ),
         ),
       ),
+    );
+    final onFullscreen = widget.onFullscreen;
+    if (onFullscreen == null) return viewer;
+    return Stack(
+      children: [
+        Positioned.fill(child: viewer),
+        Positioned(
+          right: AppSpacing.md,
+          bottom: AppSpacing.md,
+          child: Material(
+            color: Colors.black45,
+            shape: const CircleBorder(),
+            child: IconButton(
+              icon: const Icon(LucideIcons.maximize, color: Colors.white),
+              onPressed: onFullscreen,
+            ),
+          ),
+        ),
+      ],
     );
   }
 

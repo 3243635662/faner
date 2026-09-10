@@ -25,6 +25,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.onNext,
     required this.onTogglePlay,
     required this.onToggleFullscreen,
+    this.fullscreen = false,
     this.onClose,
   });
 
@@ -39,6 +40,9 @@ class ControlsOverlay extends StatelessWidget {
   final VoidCallback onNext;
   final VoidCallback onTogglePlay;
   final VoidCallback onToggleFullscreen;
+
+  /// 是否全屏（决定右下角全屏/退出全屏按钮图标）。
+  final bool fullscreen;
 
   /// 返回上一页；null 时不显示返回按钮（内嵌模式）。
   final VoidCallback? onClose;
@@ -80,6 +84,7 @@ class ControlsOverlay extends StatelessWidget {
                   controlsController: controlsController,
                   videoController: videoController,
                   hasMultiple: hasMultiple,
+                  fullscreen: fullscreen,
                   onPrevious: onPrevious,
                   onNext: onNext,
                   onTogglePlay: onTogglePlay,
@@ -197,6 +202,7 @@ class _BottomBar extends StatelessWidget {
     required this.controlsController,
     required this.videoController,
     required this.hasMultiple,
+    required this.fullscreen,
     required this.onPrevious,
     required this.onNext,
     required this.onTogglePlay,
@@ -207,6 +213,7 @@ class _BottomBar extends StatelessWidget {
   final VideoControlsController controlsController;
   final VideoPlayerController videoController;
   final bool hasMultiple;
+  final bool fullscreen;
   final VoidCallback onPrevious;
   final VoidCallback onNext;
   final VoidCallback onTogglePlay;
@@ -215,8 +222,6 @@ class _BottomBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isLandscape =
-        MediaQuery.orientationOf(context) == Orientation.landscape;
     return Padding(
       padding: EdgeInsets.only(
         top: AppSpacing.xl,
@@ -266,7 +271,7 @@ class _BottomBar extends StatelessWidget {
                 ),
               const Spacer(),
               _IconButton(
-                icon: isLandscape ? LucideIcons.minimize : LucideIcons.maximize,
+                icon: fullscreen ? LucideIcons.minimize : LucideIcons.maximize,
                 size: sizes.fullscreen,
                 onPressed: () {
                   controlsController.holdVisible();

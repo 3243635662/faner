@@ -75,15 +75,25 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: '/image',
       builder: (context, state) {
-        final (items, index) = state.extra! as (List<MediaSource>, int);
-        return ImageViewerPage(items: items, initialIndex: index);
+        final extra = state.extra!
+            as ({List<MediaSource> items, int index, bool fromSplit});
+        return ImageViewerPage(
+          items: extra.items,
+          initialIndex: extra.index,
+          fromSplit: extra.fromSplit,
+        );
       },
     ),
     GoRoute(
       path: '/video',
       builder: (context, state) {
-        final (items, index) = state.extra! as (List<MediaSource>, int);
-        return VideoPlayerPage(items: items, initialIndex: index);
+        final extra = state.extra!
+            as ({List<MediaSource> items, int index, bool fromSplit});
+        return VideoPlayerPage(
+          items: extra.items,
+          initialIndex: extra.index,
+          fromSplit: extra.fromSplit,
+        );
       },
     ),
     GoRoute(

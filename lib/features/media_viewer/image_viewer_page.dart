@@ -2,21 +2,30 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 
+import '../../core/tokens.dart';
 import 'media_source.dart';
 
 /// 沉浸式图片查看页：左右滑动切换 + 点击空白退出。
+///
+/// [fromSplit] 为 true 时（从平板双栏全屏进入），右下角显示退出全屏按钮，
+/// 点击返回双栏。
 class ImageViewerPage extends StatefulWidget {
   const ImageViewerPage({
     super.key,
     required this.items,
     required this.initialIndex,
+    this.fromSplit = false,
   });
 
   final List<MediaSource> items;
   final int initialIndex;
+
+  /// 是否从平板双栏进入（显示退出全屏按钮）。
+  final bool fromSplit;
 
   @override
   State<ImageViewerPage> createState() => _ImageViewerPageState();
@@ -95,30 +104,50 @@ class _ImageViewerPageState extends State<ImageViewerPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: PhotoViewGallery.builder(
-        scrollPhysics: const BouncingScrollPhysics(),
-        builder: (context, index) {
-          final source = widget.items[index];
-          return PhotoViewGalleryPageOptions(
-            imageProvider: switch (source) {
-              LocalMediaSource(:final path) => FileImage(File(path)),
-              RemoteMediaSource(:final url) => NetworkImage(url),
-            },
-            heroAttributes: PhotoViewHeroAttributes(tag: 'img_${source.heroTag}'),
-            minScale: PhotoViewComputedScale.contained * 0.8,
-            maxScale: PhotoViewComputedScale.covered * 4,
-            onTapUp: _onTapUp,
-          );
-        },
-        itemCount: widget.items.length,
-        pageController: _pageController,
-        onPageChanged: (index) {
-          setState(() => _currentIndex = index);
-          _loadAspectRatio(index);
-        },
-        backgroundDecoration: const BoxDecoration(color: Colors.black),
-        loadingBuilder: (context, progress) =>
-            const Center(child: CircularProgressIndicator()),
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: PhotoViewGallery.builder(
+              scrollPhysics: const BouncingScrollPhysics(),
+              builder: (context, index) {
+                final source = widget.items[index];
+                return PhotoViewGalleryPageOptions(
+                  imageProvider: switch (source) {
+                    LocalMediaSource(:final path) => FileImage(File(path)),
+                    RemoteMediaSource(:final url) => NetworkImage(url),
+                  },
+                  heroAttributes:
+                      PhotoViewHeroAttributes(tag: 'img_${source.heroTag}'),
+                  minScale: PhotoViewComputedScale.contained * 0.8,
+                  maxScale: PhotoViewComputedScale.covered * 4,
+                  onTapUp: _onTapUp,
+                );
+              },
+              itemCount: widget.items.length,
+              pageController: _pageController,
+              onPageChanged: (index) {
+                setState(() => _currentIndex = index);
+                _loadAspectRatio(index);
+              },
+              backgroundDecoration: const BoxDecoration(color: Colors.black),
+              loadingBuilder: (context, progress) =>
+                  const Center(child: CircularProgressIndicator()),
+            ),
+          ),
+          if (widget.fromSplit)
+            Positioned(
+              right: AppSpacing.md,
+              bottom: AppSpacing.md,
+              child: Material(
+                color: Colors.black45,
+                shape: const CircleBorder(),
+                child: IconButton(
+                  icon: const Icon(LucideIcons.minimize, color: Colors.white),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

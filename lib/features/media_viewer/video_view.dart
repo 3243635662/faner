@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../core/format.dart';
 import '../../core/tokens.dart';
 import '../../core/video_play_mode.dart';
 import '../../core/video_resume.dart';
@@ -32,6 +33,8 @@ class VideoView extends ConsumerStatefulWidget {
     required this.items,
     required this.initialIndex,
     this.embedded = false,
+    this.fullscreen = false,
+    this.onToggleFullscreen,
   });
 
   final List<MediaSource> items;
@@ -39,6 +42,13 @@ class VideoView extends ConsumerStatefulWidget {
 
   /// 内嵌模式（详情面板预览）：不显示返回按钮，也不接管系统状态栏。
   final bool embedded;
+
+  /// 当前是否处于全屏状态（决定右下角按钮图标）。仅在 [onToggleFullscreen]
+  /// 非空时生效。
+  final bool fullscreen;
+
+  /// 自定义全屏切换行为；为空时回退到横竖屏切换（独立页面的默认行为）。
+  final VoidCallback? onToggleFullscreen;
 
   @override
   ConsumerState<VideoView> createState() => _VideoViewState();
@@ -48,10 +58,40 @@ class _VideoViewState extends ConsumerState<VideoView>
     with WidgetsBindingObserver {
   static final Random _random = Random();
 
+  /// 左右拖动快进/后退的灵敏度：**每逻辑像素**对应的跳转时长（毫秒）。
+  ///
+  /// 用「像素速率」而非「整屏比例」，手感与屏幕朝向/尺寸无关：
+  /// 1cm ≈ 63 逻辑像素，200ms/px → 轻扫 1cm ≈ 12.6 秒。
+  /// 想更迟钝就调小（如 150 → 约 9.5 秒/cm），想更灵敏就调大。
+  static const double _seekMsPerPx = 200;
+
+  /// 滑满一屏的跳转跨度：短于「整屏速率跨度」的视频仍按全片比例映射，
+  /// 保证短视频可以精确微调。
+  static double _seekSpanMs(Duration duration, double width) {
+    final rateMs = width * _seekMsPerPx;
+    final durationMs = duration.inMilliseconds;
+    return durationMs < rateMs ? durationMs.toDouble() : rateMs;
+  }
+
   VideoPlayerController? _controller;
   late int _index;
   String? _error;
   bool _ended = false;
+
+  // 左右拖动快进/后退的临时预览进度（null 表示未在拖动）
+  Duration? _dragPreview;
+  double _dragStartX = 0;
+  Duration _dragStartPosition = Duration.zero;
+
+  // 亮度/音量（垂直拖动调节，左半屏亮度 / 右半屏音量）
+  double _brightness = 1.0;
+  double _volume = 1.0;
+  bool _adjustBrightness = false;
+  bool _showBrightness = false;
+  bool _showVolume = false;
+  double _verticalStartY = 0;
+  double _startBrightness = 1.0;
+  double _startVolume = 1.0;
 
   late final VideoControlsController _controls;
 
@@ -136,6 +176,7 @@ class _VideoViewState extends ConsumerState<VideoView>
       _ended = false;
       controller
         ..setLooping(false)
+        ..setVolume(_volume)
         ..addListener(_onVideoValueChanged)
         ..play();
       setState(() => _controller = controller);
@@ -253,6 +294,101 @@ class _VideoViewState extends ConsumerState<VideoView>
   }
 
   // ---------------------------------------------------------------------------
+  // 左右拖动快进/后退（轻扫调整进度）
+  // ---------------------------------------------------------------------------
+
+  void _onHorizontalDragStart(DragStartDetails details) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+    if (controller.value.duration <= Duration.zero) return;
+    _dragStartX = details.localPosition.dx;
+    _dragStartPosition = controller.value.position;
+    _controls.holdVisible();
+    setState(() => _dragPreview = _dragStartPosition);
+  }
+
+  void _onHorizontalDragUpdate(DragUpdateDetails details) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+    final duration = controller.value.duration;
+    if (duration <= Duration.zero) return;
+    final width = MediaQuery.sizeOf(context).width;
+    if (width <= 0) return;
+    final dx = details.localPosition.dx - _dragStartX;
+    // 固定像素速率（[_seekMsPerPx]），短视频退化为全片比例映射
+    final spanMs = _seekSpanMs(duration, width);
+    final deltaMs = (dx / width) * spanMs;
+    final targetMs = (_dragStartPosition.inMilliseconds + deltaMs).round();
+    setState(() {
+      _dragPreview = Duration(
+        milliseconds: targetMs.clamp(0, duration.inMilliseconds),
+      );
+    });
+  }
+
+  void _onHorizontalDragEnd(DragEndDetails details) {
+    final preview = _dragPreview;
+    if (preview == null) return;
+    final controller = _controller;
+    if (controller != null && controller.value.isInitialized) {
+      controller.seekTo(preview);
+      _ended = false;
+    }
+    setState(() => _dragPreview = null);
+    _controls.releaseHold();
+  }
+
+  void _onHorizontalDragCancel() {
+    if (_dragPreview == null) return;
+    setState(() => _dragPreview = null);
+    _controls.releaseHold();
+  }
+
+  // ---------------------------------------------------------------------------
+  // 垂直拖动：左半屏亮度 / 右半屏音量
+  // ---------------------------------------------------------------------------
+
+  void _onVerticalDragStart(DragStartDetails details) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+    final width = MediaQuery.sizeOf(context).width;
+    _adjustBrightness = details.localPosition.dx < width / 2;
+    _verticalStartY = details.localPosition.dy;
+    _startBrightness = _brightness;
+    _startVolume = _volume;
+    setState(() {
+      _showBrightness = _adjustBrightness;
+      _showVolume = !_adjustBrightness;
+    });
+  }
+
+  void _onVerticalDragUpdate(DragUpdateDetails details) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+    final height = MediaQuery.sizeOf(context).height;
+    if (height <= 0) return;
+    // 上滑（dy 为负）增大，整屏高度 = 全量程 0~1
+    final delta = -(details.localPosition.dy - _verticalStartY) / height;
+    if (_adjustBrightness) {
+      setState(() => _brightness = (_startBrightness + delta).clamp(0.0, 1.0));
+    } else {
+      setState(() => _volume = (_startVolume + delta).clamp(0.0, 1.0));
+      controller.setVolume(_volume);
+    }
+  }
+
+  void _onVerticalDragEnd(DragEndDetails details) {
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (mounted) {
+        setState(() {
+          _showBrightness = false;
+          _showVolume = false;
+        });
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------------
   // 断点续播
   // ---------------------------------------------------------------------------
 
@@ -274,6 +410,15 @@ class _VideoViewState extends ConsumerState<VideoView>
   // ---------------------------------------------------------------------------
 
   void _toggleFullscreen() {
+    final custom = widget.onToggleFullscreen;
+    if (custom != null) {
+      // 双栏全屏：先保存断点并暂停内嵌播放器，避免与新全屏播放器双重出声；
+      // 全屏页会读取断点续播，pop 回来后内嵌播放器停留在暂停态由用户继续。
+      _saveResume();
+      _controller?.pause();
+      custom();
+      return;
+    }
     if (_isLandscape) {
       SystemChrome.setPreferredOrientations(DeviceOrientation.values);
       if (widget.embedded) {
@@ -322,21 +467,53 @@ class _VideoViewState extends ConsumerState<VideoView>
         _togglePlay();
         _controls.releaseHold();
       },
+      onHorizontalDragStart: _onHorizontalDragStart,
+      onHorizontalDragUpdate: _onHorizontalDragUpdate,
+      onHorizontalDragEnd: _onHorizontalDragEnd,
+      onHorizontalDragCancel: _onHorizontalDragCancel,
+      onVerticalDragStart: _onVerticalDragStart,
+      onVerticalDragUpdate: _onVerticalDragUpdate,
+      onVerticalDragEnd: _onVerticalDragEnd,
       child: Stack(
         fit: StackFit.expand,
         children: [
           Center(child: _buildSurface(controller)),
+          // 亮度遮罩：亮度 < 1 时叠加半透明黑层，模拟屏幕亮度
+          if (_brightness < 1.0)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: ColoredBox(
+                  color: Colors.black.withValues(alpha: 1 - _brightness),
+                ),
+              ),
+            ),
           if (ready)
             ControlsOverlay(
               controlsController: _controls,
               videoController: controller,
               title: _current.title,
               hasMultiple: widget.items.length > 1,
+              fullscreen: widget.onToggleFullscreen != null
+                  ? widget.fullscreen
+                  : _isLandscape,
               onPrevious: _previous,
               onNext: _next,
               onTogglePlay: _togglePlay,
               onToggleFullscreen: _toggleFullscreen,
               onClose: widget.embedded ? null : () => context.pop(),
+            ),
+          if (_dragPreview != null && ready) _buildDragPreview(controller),
+          if (_showBrightness)
+            _buildAdjustIndicator(
+              icon: LucideIcons.sun,
+              value: _brightness,
+              left: true,
+            ),
+          if (_showVolume)
+            _buildAdjustIndicator(
+              icon: LucideIcons.volume_2,
+              value: _volume,
+              left: false,
             ),
         ],
       ),
@@ -356,6 +533,117 @@ class _VideoViewState extends ConsumerState<VideoView>
     return AspectRatio(
       aspectRatio: controller.value.aspectRatio,
       child: VideoPlayer(controller),
+    );
+  }
+
+  /// 拖动时的进度预览提示（中央：方向箭头 + 目标时间 + 进度条）。
+  Widget _buildDragPreview(VideoPlayerController controller) {
+    final preview = _dragPreview!;
+    final duration = controller.value.duration;
+    final isForward = preview >= _dragStartPosition;
+    final progress = duration.inMilliseconds == 0
+        ? 0.0
+        : (preview.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0);
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.lg,
+          vertical: AppSpacing.md,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.black54,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isForward ? LucideIcons.arrow_right : LucideIcons.arrow_left,
+                  color: Colors.white,
+                  size: 22,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Text(
+                  formatDuration(preview),
+                  style: AppTypography.title.copyWith(color: Colors.white),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            SizedBox(
+              width: 128,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadius.pill),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: AppSpacing.xs,
+                  backgroundColor: Colors.white24,
+                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              formatDuration(duration),
+              style: AppTypography.caption.copyWith(color: Colors.white70),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 亮度/音量调节指示条（垂直进度胶囊，位于屏幕左/右侧）。
+  Widget _buildAdjustIndicator({
+    required IconData icon,
+    required double value,
+    required bool left,
+  }) {
+    return Positioned(
+      left: left ? AppSpacing.lg : null,
+      right: left ? null : AppSpacing.lg,
+      top: 0,
+      bottom: 0,
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.lg,
+          ),
+          decoration: BoxDecoration(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: Colors.white, size: 22),
+              const SizedBox(height: AppSpacing.md),
+              Container(
+                width: AppSpacing.xs,
+                height: AppSpacing.xxl * 3,
+                alignment: Alignment.bottomCenter,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                ),
+                child: FractionallySizedBox(
+                  heightFactor: value.clamp(0.0, 1.0),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

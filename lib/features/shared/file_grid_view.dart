@@ -14,6 +14,7 @@ class FileGridView extends StatelessWidget {
     required this.onTap,
     this.onLongPress,
     this.thumbnailResolver,
+    this.selectedPath,
   });
 
   final List<FileEntry> entries;
@@ -26,6 +27,9 @@ class FileGridView extends StatelessWidget {
   final bool isRemote;
   final ValueChanged<FileEntry> onTap;
   final ValueChanged<FileEntry>? onLongPress;
+
+  /// 当前选中项路径（平板双栏高亮用）。
+  final String? selectedPath;
 
   @override
   Widget build(BuildContext context) {
@@ -46,12 +50,14 @@ class FileGridView extends StatelessWidget {
             final entry = entries[index];
             return _FileCell(
               entry: entry,
+              selected: entry.path == selectedPath,
               thumbnail: FileThumbnail(
                 entry: entry,
                 fileResolver: fileResolver,
                 isRemote: isRemote,
                 thumbnailResolver: thumbnailResolver,
                 iconSize: 48,
+                showMeta: true,
               ),
               onTap: () => onTap(entry),
               onLongPress: onLongPress == null ? null : () => onLongPress!(entry),
@@ -69,12 +75,14 @@ class _FileCell extends StatelessWidget {
     required this.thumbnail,
     required this.onTap,
     this.onLongPress,
+    this.selected = false,
   });
 
   final FileEntry entry;
   final Widget thumbnail;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
@@ -92,6 +100,9 @@ class _FileCell extends StatelessWidget {
               decoration: BoxDecoration(
                 color: palette.panel2,
                 borderRadius: BorderRadius.circular(AppRadius.md),
+                border: selected
+                    ? Border.all(color: palette.brand, width: 2)
+                    : null,
               ),
               clipBehavior: Clip.antiAlias,
               child: thumbnail,
@@ -105,7 +116,10 @@ class _FileCell extends StatelessWidget {
             style: Theme.of(context)
                 .textTheme
                 .bodySmall
-                ?.copyWith(color: palette.text),
+                ?.copyWith(
+                  color: selected ? palette.brand : palette.text,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                ),
           ),
         ],
       ),

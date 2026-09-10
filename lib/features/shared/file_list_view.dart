@@ -16,6 +16,7 @@ class FileListView extends StatelessWidget {
     required this.onTap,
     this.onLongPress,
     this.thumbnailResolver,
+    this.selectedPath,
   });
 
   final List<FileEntry> entries;
@@ -24,6 +25,9 @@ class FileListView extends StatelessWidget {
   final bool isRemote;
   final ValueChanged<FileEntry> onTap;
   final ValueChanged<FileEntry>? onLongPress;
+
+  /// 当前选中项路径（平板双栏高亮用）。
+  final String? selectedPath;
 
   @override
   Widget build(BuildContext context) {
@@ -37,6 +41,7 @@ class FileListView extends StatelessWidget {
         final entry = entries[index];
         return _FileListTile(
           entry: entry,
+          selected: entry.path == selectedPath,
           thumbnail: FileThumbnail(
             entry: entry,
             fileResolver: fileResolver,
@@ -58,12 +63,14 @@ class _FileListTile extends StatelessWidget {
     required this.thumbnail,
     required this.onTap,
     this.onLongPress,
+    this.selected = false,
   });
 
   final FileEntry entry;
   final Widget thumbnail;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
@@ -74,7 +81,8 @@ class _FileListTile extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       onLongPress: onLongPress,
-      child: Padding(
+      child: Container(
+        color: selected ? palette.brand.withValues(alpha: 0.08) : null,
         padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.lg,
           vertical: AppSpacing.sm,
@@ -101,7 +109,11 @@ class _FileListTile extends StatelessWidget {
                     style: Theme.of(context)
                         .textTheme
                         .bodyMedium
-                        ?.copyWith(color: palette.text),
+                        ?.copyWith(
+                          color: selected ? palette.brand : palette.text,
+                          fontWeight:
+                              selected ? FontWeight.w600 : FontWeight.w400,
+                        ),
                   ),
                   const SizedBox(height: AppSpacing.xs),
                   Text(

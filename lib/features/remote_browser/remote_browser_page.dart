@@ -5,9 +5,9 @@ import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/breakpoints.dart';
 import '../../core/file_type.dart';
 import '../../core/file_view_mode.dart';
+import '../../core/responsive.dart';
 import '../../core/tokens.dart';
 import '../../data/models/device_info.dart';
 import '../../data/models/file_entry.dart';
@@ -17,6 +17,7 @@ import '../../providers/settings_provider.dart';
 import '../media_viewer/media_source.dart';
 import '../shared/browser_scaffold.dart';
 import '../shared/detail_panel.dart';
+import '../shared/empty_state.dart';
 import '../shared/error_view.dart';
 import '../shared/file_grid_view.dart';
 import '../shared/file_list_view.dart';
@@ -72,25 +73,48 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
     _openMedia(entry, allEntries);
   }
 
-  void _openMedia(FileEntry entry, List<FileEntry> allEntries) {
+  void _openMedia(
+    FileEntry entry,
+    List<FileEntry> allEntries, {
+    bool fromSplit = false,
+  }) {
     // 同类型媒体列表 + 当前索引，供左右滑动/切换
     final sameType = allEntries.where((e) => e.type == entry.type).toList();
     var index = sameType.indexWhere((e) => e.path == entry.path);
     if (index < 0) index = 0;
-    final sources = sameType
+    final List<MediaSource> sources = sameType
         .map((e) => RemoteMediaSource(_url(e), title: e.name))
         .toList();
     switch (entry.type) {
       case EntryType.image:
-        context.push('/image', extra: (sources, index));
+        context.push(
+          '/image',
+          extra: (items: sources, index: index, fromSplit: fromSplit),
+        );
       case EntryType.video:
-        context.push('/video', extra: (sources, index));
+        context.push(
+          '/video',
+          extra: (items: sources, index: index, fromSplit: fromSplit),
+        );
       case EntryType.audio:
         context.push('/audio', extra: sources[index]);
       case EntryType.folder:
       case EntryType.other:
         _showSnack('暂不支持预览该文件');
     }
+  }
+
+  /// 双栏详情面板触发全屏：用当前目录完整列表构造媒体源并 push 全屏路由，
+  /// 让全屏页能左右切换同类型媒体（fromSplit=true，全屏按钮=返回双栏）。
+  void _openFullscreen(FileEntry entry) {
+    final path = ref.read(remotePathProvider);
+    final key = RemoteBrowseKey(widget.device, path);
+    final async = ref.read(remoteBrowserProvider(key));
+    final entries = async.maybeWhen(
+      data: (list) => list,
+      orElse: () => [entry],
+    );
+    _openMedia(entry, entries, fromSplit: true);
   }
 
   /// 返回上一级目录。
@@ -165,10 +189,11 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
     final path = ref.watch(remotePathProvider);
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= Breakpoints.medium;
+        final isWide = Responsive.useSplitLayout(context, constraints.maxWidth);
         final mode = ref.watch(settingsProvider.select((s) => s.viewMode));
-        // 返回键优先级：关闭搜索 → 取消选中（路径回退由 go_router onExit 处理）
-        final canPop = !_searching && _selected == null;
+        // 返回键/手势优先级：关闭搜索 → 取消选中 → 回上级目录；仅根目录才退出应用。
+        // PopScope 拦截路径回退，go_router onExit 作为兜底（兼容不同 go_router 版本）。
+        final canPop = !_searching && _selected == null && path.isEmpty;
         return PopScope(
           canPop: canPop,
           onPopInvokedWithResult: (didPop, result) {
@@ -220,6 +245,7 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
                         entry: _selected,
                         resolver: _url,
                         isRemote: true,
+                        onOpenFullscreen: _openFullscreen,
                       ),
                     ),
                   ),
@@ -277,38 +303,44 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
 
   Widget _breadcrumb(String path) {
     final palette = AppPalette.of(context);
-    final items = <(String, String)>[(widget.device.deviceName, '')];
+    final all = <(String, String)>[(widget.device.deviceName, '')];
     var acc = '';
     for (final seg in path.split('/')) {
       if (seg.isEmpty) continue;
       acc = acc.isEmpty ? seg : '$acc/$seg';
-      items.add((seg, acc));
+      all.add((seg, acc));
     }
+    // 深目录折叠：根 / … / 上一级 / 当前
+    final items = all.length > 4
+        ? [all.first, ('…', ''), all[all.length - 2], all.last]
+        : all;
     return SizedBox(
       height: 36,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
         itemCount: items.length,
-        separatorBuilder: (_, _) => Icon(LucideIcons.chevron_right, size: 16, color: palette.muted),
+        separatorBuilder: (_, _) =>
+            Icon(LucideIcons.chevron_right, size: 16, color: palette.muted),
         itemBuilder: (context, index) {
           final (label, full) = items[index];
           final isLast = index == items.length - 1;
+          final isEllipsis = label == '…';
+          final text = Text(
+            label,
+            style: TextStyle(
+              color: isLast ? palette.text : palette.muted,
+              fontWeight: isLast ? FontWeight.w600 : FontWeight.w400,
+              fontSize: 13,
+            ),
+          );
+          if (isEllipsis) return Center(child: text);
           return InkWell(
             onTap: () {
               ref.read(remotePathProvider.notifier).set(full);
               setState(() => _selected = null);
             },
-            child: Center(
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: isLast ? palette.text : palette.muted,
-                  fontWeight: isLast ? FontWeight.w600 : FontWeight.w400,
-                  fontSize: 13,
-                ),
-              ),
-            ),
+            child: Center(child: text),
           );
         },
       ),
@@ -317,6 +349,7 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
 
   Widget _buildList(bool isWide, String path) {
     final mode = ref.watch(settingsProvider.select((s) => s.viewMode));
+    final selectedPath = _selected?.path;
     if (_searching) {
       if (_searchLoading) {
         return mode == FileViewMode.list
@@ -325,7 +358,8 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
       }
       final results = _searchResults ?? const [];
       if (results.isEmpty) return _empty('未找到匹配文件');
-      return _fileView(_sortEntries(results), isWide);
+      return _fileView(_sortEntries(results), isWide,
+          selectedPath: selectedPath);
     }
     final key = RemoteBrowseKey(widget.device, path);
     final asyncEntries = ref.watch(remoteBrowserProvider(key));
@@ -336,7 +370,7 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
         return RefreshIndicator(
           onRefresh: () =>
               ref.refresh(remoteBrowserProvider(key).future).then((_) {}),
-          child: _fileView(filtered, isWide),
+          child: _fileView(filtered, isWide, selectedPath: selectedPath),
         );
       },
       loading: () => mode == FileViewMode.list
@@ -346,7 +380,11 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
     );
   }
 
-  Widget _fileView(List<FileEntry> entries, bool isWide) {
+  Widget _fileView(
+    List<FileEntry> entries,
+    bool isWide, {
+    String? selectedPath,
+  }) {
     final mode = ref.watch(settingsProvider.select((s) => s.viewMode));
     if (mode == FileViewMode.list) {
       return FileListView(
@@ -354,6 +392,7 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
         fileResolver: _url,
         thumbnailResolver: _thumbUrl,
         isRemote: true,
+        selectedPath: selectedPath,
         onTap: (e) => _onTap(e, isWide, entries),
       );
     }
@@ -362,6 +401,7 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
       fileResolver: _url,
       thumbnailResolver: _thumbUrl,
       isRemote: true,
+      selectedPath: selectedPath,
       onTap: (e) => _onTap(e, isWide, entries),
     );
   }
@@ -418,7 +458,7 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
               child: Row(
                 children: [
                   Icon(
-                    Icons.check,
+                    LucideIcons.check,
                     size: 18,
                     color: _sortField == field && _ascending == asc
                         ? palette.brand
@@ -436,7 +476,7 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.sort, size: 20, color: palette.text),
+            Icon(LucideIcons.arrow_up_down, size: 20, color: palette.text),
             const SizedBox(width: AppSpacing.xs),
             Text(label, style: TextStyle(color: palette.text, fontSize: 13)),
           ],
@@ -445,19 +485,8 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
     );
   }
 
-  Widget _empty(String message) {
-    final palette = AppPalette.of(context);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.cloud_off_outlined, size: 64, color: palette.muted),
-          const SizedBox(height: AppSpacing.md),
-          Text(message, style: TextStyle(color: palette.muted)),
-        ],
-      ),
-    );
-  }
+  Widget _empty(String message) =>
+      EmptyState(icon: LucideIcons.cloud_off, title: message);
 
   Widget _errorView(String message) {
     return ErrorView(

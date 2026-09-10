@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 
 import '../../core/file_type.dart';
+import '../../core/format.dart';
+import '../../core/media_metadata.dart';
 import '../../core/tokens.dart';
 import '../../core/video_thumbnail.dart';
 import '../../data/models/file_entry.dart';
@@ -21,6 +23,7 @@ class FileThumbnail extends StatelessWidget {
     required this.isRemote,
     this.thumbnailResolver,
     this.iconSize = 44,
+    this.showMeta = false,
   });
 
   final FileEntry entry;
@@ -28,6 +31,9 @@ class FileThumbnail extends StatelessWidget {
   final bool isRemote;
   final String Function(FileEntry)? thumbnailResolver;
   final double iconSize;
+
+  /// 是否在右下角叠加元数据角标（本地视频时长）。
+  final bool showMeta;
 
   @override
   Widget build(BuildContext context) {
@@ -54,7 +60,19 @@ class FileThumbnail extends StatelessWidget {
           return _network(resolver(entry), palette);
         }
       } else {
-        return VideoThumbnail(path: fileResolver(entry));
+        final thumb = VideoThumbnail(path: fileResolver(entry));
+        if (!showMeta) return thumb;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            thumb,
+            Positioned(
+              right: AppSpacing.xs,
+              bottom: AppSpacing.xs,
+              child: _VideoDurationBadge(path: fileResolver(entry)),
+            ),
+          ],
+        );
       }
     }
     return _fallback(palette);
@@ -81,4 +99,51 @@ class FileThumbnail extends StatelessWidget {
           Icon(LucideIcons.music, color: palette.sky, size: iconSize),
         _ => Icon(LucideIcons.file, color: palette.muted, size: iconSize),
       };
+}
+
+/// 视频时长角标（本地视频，右下角）。
+class _VideoDurationBadge extends StatelessWidget {
+  const _VideoDurationBadge({required this.path});
+
+  final String path;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Duration?>(
+      future: fetchVideoDuration(path),
+      builder: (context, snapshot) {
+        final duration = snapshot.data;
+        if (duration == null) return const SizedBox.shrink();
+        return _Badge(text: formatDuration(duration));
+      },
+    );
+  }
+}
+
+/// 半透明黑底 + 白色小字的右下角角标。
+class _Badge extends StatelessWidget {
+  const _Badge({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+      ),
+      child: Text(
+        text,
+        style: AppTypography.caption.copyWith(
+          color: Colors.white,
+          fontSize: 11,
+        ),
+      ),
+    );
+  }
 }

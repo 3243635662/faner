@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../core/breakpoints.dart';
+import '../../core/responsive.dart';
 import '../../core/tokens.dart';
 
 /// 响应式主从布局容器。
@@ -20,7 +20,7 @@ class BrowserScaffold extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth >= Breakpoints.medium) {
+        if (Responsive.useSplitLayout(context, constraints.maxWidth)) {
           return Row(
             children: [
               Expanded(flex: 2, child: list),

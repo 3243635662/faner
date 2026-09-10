@@ -5,12 +5,12 @@ import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/breakpoints.dart';
 import '../../core/constants.dart';
 import '../../core/file_type.dart';
 import '../../core/file_view_mode.dart';
 import '../../core/prompts.dart';
 import '../../core/result.dart';
+import '../../core/responsive.dart';
 import '../../core/tokens.dart';
 import '../../data/models/file_entry.dart';
 import '../../permissions/storage_permission.dart';
@@ -20,6 +20,7 @@ import '../../providers/settings_provider.dart';
 import '../media_viewer/media_source.dart';
 import '../shared/browser_scaffold.dart';
 import '../shared/detail_panel.dart';
+import '../shared/empty_state.dart';
 import '../shared/error_view.dart';
 import '../shared/file_grid_view.dart';
 import '../shared/file_list_view.dart';
@@ -93,25 +94,47 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
     _openMedia(entry, allEntries);
   }
 
-  void _openMedia(FileEntry entry, List<FileEntry> allEntries) {
+  void _openMedia(
+    FileEntry entry,
+    List<FileEntry> allEntries, {
+    bool fromSplit = false,
+  }) {
     // 同类型媒体列表 + 当前索引，供左右滑动/切换
     final sameType = allEntries.where((e) => e.type == entry.type).toList();
     var index = sameType.indexWhere((e) => e.path == entry.path);
     if (index < 0) index = 0;
-    final sources = sameType
+    final List<MediaSource> sources = sameType
         .map((e) => LocalMediaSource(_absolute(e.path), title: e.name))
         .toList();
     switch (entry.type) {
       case EntryType.image:
-        context.push('/image', extra: (sources, index));
+        context.push(
+          '/image',
+          extra: (items: sources, index: index, fromSplit: fromSplit),
+        );
       case EntryType.video:
-        context.push('/video', extra: (sources, index));
+        context.push(
+          '/video',
+          extra: (items: sources, index: index, fromSplit: fromSplit),
+        );
       case EntryType.audio:
         context.push('/audio', extra: sources[index]);
       case EntryType.folder:
       case EntryType.other:
         _showSnack('暂不支持预览该文件');
     }
+  }
+
+  /// 双栏详情面板触发全屏：用当前目录完整列表构造媒体源并 push 全屏路由，
+  /// 让全屏页能左右切换同类型媒体（fromSplit=true，全屏按钮=返回双栏）。
+  void _openFullscreen(FileEntry entry) {
+    final path = ref.read(localPathProvider);
+    final async = ref.read(localBrowserProvider(path));
+    final entries = async.maybeWhen(
+      data: (list) => list,
+      orElse: () => [entry],
+    );
+    _openMedia(entry, entries, fromSplit: true);
   }
 
   String _absolute(String relPath) {
@@ -265,10 +288,11 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
     final path = ref.watch(localPathProvider);
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= Breakpoints.medium;
+        final isWide = Responsive.useSplitLayout(context, constraints.maxWidth);
         final selected = ref.watch(selectedEntryProvider);
-        // 返回键优先级：关闭搜索 → 取消选中（路径回退由 go_router onExit 处理）
-        final canPop = !_searching && selected == null;
+        // 返回键/手势优先级：关闭搜索 → 取消选中 → 回上级目录；仅根目录才退出应用。
+        // PopScope 拦截路径回退，go_router onExit 作为兜底（兼容不同 go_router 版本）。
+        final canPop = !_searching && selected == null && path.isEmpty;
         return PopScope(
           canPop: canPop,
           onPopInvokedWithResult: (didPop, result) {
@@ -301,6 +325,7 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
                       entry: selected,
                       resolver: (e) => _absolute(e.path),
                       isRemote: false,
+                      onOpenFullscreen: _openFullscreen,
                     ),
                   ),
                 ),
@@ -409,38 +434,44 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
 
   Widget _breadcrumb(String path) {
     final palette = AppPalette.of(context);
-    final items = <(String, String)>[(AppConstants.sharedRootLabel, '')];
+    final all = <(String, String)>[(AppConstants.sharedRootLabel, '')];
     var acc = '';
     for (final seg in path.split('/')) {
       if (seg.isEmpty) continue;
       acc = acc.isEmpty ? seg : '$acc/$seg';
-      items.add((seg, acc));
+      all.add((seg, acc));
     }
+    // 深目录折叠：根 / … / 上一级 / 当前
+    final items = all.length > 4
+        ? [all.first, ('…', ''), all[all.length - 2], all.last]
+        : all;
     return SizedBox(
       height: 36,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
         itemCount: items.length,
-        separatorBuilder: (_, _) => Icon(LucideIcons.chevron_right, size: 16, color: palette.muted),
+        separatorBuilder: (_, _) =>
+            Icon(LucideIcons.chevron_right, size: 16, color: palette.muted),
         itemBuilder: (context, index) {
           final (label, full) = items[index];
           final isLast = index == items.length - 1;
+          final isEllipsis = label == '…';
+          final text = Text(
+            label,
+            style: TextStyle(
+              color: isLast ? palette.text : palette.muted,
+              fontWeight: isLast ? FontWeight.w600 : FontWeight.w400,
+              fontSize: 13,
+            ),
+          );
+          if (isEllipsis) return Center(child: text);
           return InkWell(
             onTap: () {
               ref.read(localPathProvider.notifier).set(full);
               ref.read(selectedEntryProvider.notifier).select(null);
             },
-            child: Center(
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: isLast ? palette.text : palette.muted,
-                  fontWeight: isLast ? FontWeight.w600 : FontWeight.w400,
-                  fontSize: 13,
-                ),
-              ),
-            ),
+            child: Center(child: text),
           );
         },
       ),
@@ -449,6 +480,8 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
 
   Widget _buildList(bool isWide) {
     final mode = ref.watch(settingsProvider.select((s) => s.viewMode));
+    final selectedPath =
+        ref.watch(selectedEntryProvider.select((e) => e?.path));
     if (_searching) {
       if (_searchLoading) {
         return mode == FileViewMode.list
@@ -457,7 +490,8 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
       }
       final results = _searchResults ?? const [];
       if (results.isEmpty) return _empty('未找到匹配文件');
-      return _fileView(_sortEntries(results), isWide);
+      return _fileView(_sortEntries(results), isWide,
+          selectedPath: selectedPath);
     }
     final path = ref.watch(localPathProvider);
     final asyncEntries = ref.watch(localBrowserProvider(path));
@@ -468,7 +502,8 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
         return RefreshIndicator(
           onRefresh: () =>
               ref.refresh(localBrowserProvider(path).future).then((_) {}),
-          child: _fileView(filtered, isWide, onLongPress: _showEntryActions),
+          child: _fileView(filtered, isWide,
+              selectedPath: selectedPath, onLongPress: _showEntryActions),
         );
       },
       loading: () => mode == FileViewMode.list
@@ -481,6 +516,7 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
   Widget _fileView(
     List<FileEntry> entries,
     bool isWide, {
+    String? selectedPath,
     ValueChanged<FileEntry>? onLongPress,
   }) {
     final mode = ref.watch(settingsProvider.select((s) => s.viewMode));
@@ -489,6 +525,7 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
         entries: entries,
         fileResolver: _absoluteOf,
         isRemote: false,
+        selectedPath: selectedPath,
         onTap: (e) => _onTapEntry(e, isWide, entries),
         onLongPress: onLongPress,
       );
@@ -497,6 +534,7 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
       entries: entries,
       fileResolver: _absoluteOf,
       isRemote: false,
+      selectedPath: selectedPath,
       onTap: (e) => _onTapEntry(e, isWide, entries),
       onLongPress: onLongPress,
     );
@@ -584,19 +622,8 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
     );
   }
 
-  Widget _empty(String message) {
-    final palette = AppPalette.of(context);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(LucideIcons.inbox, size: 64, color: palette.muted),
-          const SizedBox(height: AppSpacing.md),
-          Text(message, style: TextStyle(color: palette.muted)),
-        ],
-      ),
-    );
-  }
+  Widget _empty(String message) =>
+      EmptyState(icon: LucideIcons.inbox, title: message);
 
   Widget _errorView(String message) {
     return ErrorView(
@@ -659,35 +686,15 @@ class _PermissionGate extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final palette = AppPalette.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xxl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.folder_x, size: 72, color: palette.muted),
-            const SizedBox(height: AppSpacing.lg),
-            Text(
-              '需要存储权限才能浏览本地文件',
-              style: Theme.of(context).textTheme.titleMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              'Faner 需要「所有文件访问」权限，才能读取和共享本机任意文件。\n'
-              '点击下方按钮后，请在系统设置中开启“所有文件访问”，再返回本页。',
-              style: TextStyle(color: palette.muted),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            FilledButton.icon(
-              onPressed: onRequest,
-              icon: const Icon(LucideIcons.lock_open),
-              label: const Text('去授权'),
-            ),
-          ],
-        ),
+    return EmptyState(
+      icon: LucideIcons.folder_x,
+      title: '需要存储权限才能浏览本地文件',
+      subtitle: 'Faner 需要「所有文件访问」权限，才能读取和共享本机任意文件。\n'
+          '点击下方按钮后，请在系统设置中开启“所有文件访问”，再返回本页。',
+      action: FilledButton.icon(
+        onPressed: onRequest,
+        icon: const Icon(LucideIcons.lock_open),
+        label: const Text('去授权'),
       ),
     );
   }
