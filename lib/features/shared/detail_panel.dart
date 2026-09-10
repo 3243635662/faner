@@ -1,0 +1,100 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_lucide/flutter_lucide.dart';
+
+import '../../core/file_type.dart';
+import '../../core/tokens.dart';
+import '../../data/models/file_entry.dart';
+import '../media_viewer/audio_view.dart';
+import '../media_viewer/image_view.dart';
+import '../media_viewer/media_source.dart';
+import '../media_viewer/video_view.dart';
+
+/// 平板主从布局右侧详情面板，原地预览选中项。
+class DetailPanel extends StatelessWidget {
+  const DetailPanel({
+    super.key,
+    required this.entry,
+    required this.resolver,
+    required this.isRemote,
+  });
+
+  final FileEntry? entry;
+  final String Function(FileEntry) resolver;
+  final bool isRemote;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final current = entry;
+    if (current == null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(LucideIcons.mouse_pointer_click, size: 56, color: palette.muted),
+            const SizedBox(height: AppSpacing.md),
+            Text('选择文件以在此预览', style: TextStyle(color: palette.muted)),
+          ],
+        ),
+      );
+    }
+
+    // 用 path 作 key，切换选中项时强制重建播放器
+    return KeyedSubtree(
+      key: ValueKey(current.path),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: _buildPreview(context, current),
+      ),
+    );
+  }
+
+  Widget _buildPreview(BuildContext context, FileEntry entry) {
+    final palette = AppPalette.of(context);
+    switch (entry.type) {
+      case EntryType.folder:
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(LucideIcons.folder, size: 72, color: palette.amber),
+              const SizedBox(height: AppSpacing.md),
+              Text(entry.name, style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: AppSpacing.sm),
+              Text('点击列表中的文件夹进入', style: TextStyle(color: palette.muted)),
+            ],
+          ),
+        );
+      case EntryType.image:
+        return ImageView(source: mediaSourceFor(entry, resolver, isRemote));
+      case EntryType.video:
+        return Center(
+          child: VideoView(
+            items: [mediaSourceFor(entry, resolver, isRemote)],
+            initialIndex: 0,
+            embedded: true,
+          ),
+        );
+      case EntryType.audio:
+        return Center(
+          child: AudioView(source: mediaSourceFor(entry, resolver, isRemote)),
+        );
+      case EntryType.other:
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(LucideIcons.file, size: 64, color: palette.muted),
+              const SizedBox(height: AppSpacing.md),
+              Text(entry.name, textAlign: TextAlign.center),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                '${entry.formattedSize} · 暂不支持预览',
+                style: TextStyle(color: palette.muted),
+              ),
+            ],
+          ),
+        );
+    }
+  }
+}
