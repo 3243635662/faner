@@ -15,6 +15,17 @@ class LocalPathNotifier extends Notifier<String> {
   void set(String path) => state = path;
 }
 
+/// 远程浏览：当前路径（全局，供 go_router onExit 拦截系统返回键）。
+final remotePathProvider =
+    NotifierProvider<RemotePathNotifier, String>(RemotePathNotifier.new);
+
+class RemotePathNotifier extends Notifier<String> {
+  @override
+  String build() => '';
+
+  void set(String path) => state = path;
+}
+
 /// 本地浏览：按路径加载文件列表。
 final localBrowserProvider =
     FutureProvider.autoDispose.family<List<FileEntry>, String>((ref, path) async {

@@ -267,8 +267,8 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= Breakpoints.medium;
         final selected = ref.watch(selectedEntryProvider);
-        // 返回键优先级：关闭搜索 → 取消选中 → 回上级目录 → 默认
-        final canPop = !_searching && selected == null && path.isEmpty;
+        // 返回键优先级：关闭搜索 → 取消选中（路径回退由 go_router onExit 处理）
+        final canPop = !_searching && selected == null;
         return PopScope(
           canPop: canPop,
           onPopInvokedWithResult: (didPop, result) {

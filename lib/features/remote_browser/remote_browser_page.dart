@@ -35,7 +35,6 @@ class RemoteBrowserPage extends ConsumerStatefulWidget {
 class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
   final TextEditingController _searchController = TextEditingController();
   Timer? _debounce;
-  String _path = '';
   FileEntry? _selected;
   EntryType? _filter;
   bool _searching = false;
@@ -59,8 +58,8 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
 
   void _onTap(FileEntry entry, bool isWide, List<FileEntry> allEntries) {
     if (entry.isFolder) {
+      ref.read(remotePathProvider.notifier).set(entry.path);
       setState(() {
-        _path = entry.path;
         _selected = null;
         _exitSearch();
       });
@@ -96,12 +95,11 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
 
   /// 返回上一级目录。
   void _goUp() {
-    final idx = _path.lastIndexOf('/');
-    final parent = idx == -1 ? '' : _path.substring(0, idx);
-    setState(() {
-      _path = parent;
-      _selected = null;
-    });
+    final path = ref.read(remotePathProvider);
+    final idx = path.lastIndexOf('/');
+    final parent = idx == -1 ? '' : path.substring(0, idx);
+    ref.read(remotePathProvider.notifier).set(parent);
+    setState(() => _selected = null);
   }
 
   /// 统一返回处理：关闭搜索 → 取消选中 → 回上级目录 → 退出页面。
@@ -110,7 +108,7 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
       _toggleSearch();
     } else if (_selected != null) {
       setState(() => _selected = null);
-    } else if (_path.isNotEmpty) {
+    } else if (ref.read(remotePathProvider).isNotEmpty) {
       _goUp();
     } else {
       context.pop();
@@ -164,12 +162,13 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
 
   @override
   Widget build(BuildContext context) {
+    final path = ref.watch(remotePathProvider);
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= Breakpoints.medium;
         final mode = ref.watch(settingsProvider.select((s) => s.viewMode));
-        // 返回键优先级：关闭搜索 → 取消选中 → 回上级目录 → 退出页面
-        final canPop = !_searching && _selected == null && _path.isEmpty;
+        // 返回键优先级：关闭搜索 → 取消选中（路径回退由 go_router onExit 处理）
+        final canPop = !_searching && _selected == null;
         return PopScope(
           canPop: canPop,
           onPopInvokedWithResult: (didPop, result) {
@@ -213,10 +212,10 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
                       _sortButton(),
                     ],
                   ),
-                  _breadcrumb(),
+                  _breadcrumb(path),
                   Expanded(
                     child: BrowserScaffold(
-                      list: _buildList(isWide),
+                      list: _buildList(isWide, path),
                       detail: DetailPanel(
                         entry: _selected,
                         resolver: _url,
@@ -276,11 +275,11 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
     );
   }
 
-  Widget _breadcrumb() {
+  Widget _breadcrumb(String path) {
     final palette = AppPalette.of(context);
     final items = <(String, String)>[(widget.device.deviceName, '')];
     var acc = '';
-    for (final seg in _path.split('/')) {
+    for (final seg in path.split('/')) {
       if (seg.isEmpty) continue;
       acc = acc.isEmpty ? seg : '$acc/$seg';
       items.add((seg, acc));
@@ -296,10 +295,10 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
           final (label, full) = items[index];
           final isLast = index == items.length - 1;
           return InkWell(
-            onTap: () => setState(() {
-              _path = full;
-              _selected = null;
-            }),
+            onTap: () {
+              ref.read(remotePathProvider.notifier).set(full);
+              setState(() => _selected = null);
+            },
             child: Center(
               child: Text(
                 label,
@@ -316,7 +315,7 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
     );
   }
 
-  Widget _buildList(bool isWide) {
+  Widget _buildList(bool isWide, String path) {
     final mode = ref.watch(settingsProvider.select((s) => s.viewMode));
     if (_searching) {
       if (_searchLoading) {
@@ -328,7 +327,7 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
       if (results.isEmpty) return _empty('未找到匹配文件');
       return _fileView(_sortEntries(results), isWide);
     }
-    final key = RemoteBrowseKey(widget.device, _path);
+    final key = RemoteBrowseKey(widget.device, path);
     final asyncEntries = ref.watch(remoteBrowserProvider(key));
     return asyncEntries.when(
       data: (entries) {

@@ -233,6 +233,26 @@ class _VideoViewState extends ConsumerState<VideoView>
       _loadIndex((_index - 1 + widget.items.length) % widget.items.length);
 
   // ---------------------------------------------------------------------------
+  // 播放/暂停（底部按钮与双击手势共用）
+  // ---------------------------------------------------------------------------
+
+  Future<void> _togglePlay() async {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+    if (controller.value.isPlaying) {
+      await controller.pause();
+    } else {
+      // 播放结束时点播放 = 从头重播
+      if (controller.value.duration > Duration.zero &&
+          controller.value.position >= controller.value.duration) {
+        await controller.seekTo(Duration.zero);
+        _ended = false;
+      }
+      await controller.play();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // 断点续播
   // ---------------------------------------------------------------------------
 
@@ -296,6 +316,12 @@ class _VideoViewState extends ConsumerState<VideoView>
       // opaque：点在视频区域的透明部分（上下黑边）也能触发控件 toggle
       behavior: HitTestBehavior.opaque,
       onTap: _controls.toggle,
+      // 双击：播放/暂停快捷切换（短暂显示控件作为反馈）
+      onDoubleTap: () {
+        _controls.holdVisible();
+        _togglePlay();
+        _controls.releaseHold();
+      },
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -308,6 +334,7 @@ class _VideoViewState extends ConsumerState<VideoView>
               hasMultiple: widget.items.length > 1,
               onPrevious: _previous,
               onNext: _next,
+              onTogglePlay: _togglePlay,
               onToggleFullscreen: _toggleFullscreen,
               onClose: widget.embedded ? null : () => context.pop(),
             ),

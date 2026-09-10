@@ -7,8 +7,10 @@ import '../../../core/tokens.dart';
 import '../controllers/video_controls_controller.dart';
 import 'video_progress_bar.dart';
 
-/// 播放控件覆盖层：顶部栏（返回/标题）+ 中间三连按钮
-/// （上一个 / 播放暂停 / 下一个）+ 底部进度条与全屏按钮。
+/// 播放控件覆盖层：顶部栏（返回/标题）+ 底部（进度条 + 控制按钮）。
+///
+/// 控制按钮（上一个 / 播放暂停 / 下一个 / 全屏）集中在底部区域，
+/// 便于单手操作。
 ///
 /// 显隐完全由 [controlsController] 驱动；隐藏时通过 [IgnorePointer]
 /// 彻底禁用点击，避免"看不见但仍挡住视频区域手势"。
@@ -21,6 +23,7 @@ class ControlsOverlay extends StatelessWidget {
     required this.hasMultiple,
     required this.onPrevious,
     required this.onNext,
+    required this.onTogglePlay,
     required this.onToggleFullscreen,
     this.onClose,
   });
@@ -34,6 +37,7 @@ class ControlsOverlay extends StatelessWidget {
 
   final VoidCallback onPrevious;
   final VoidCallback onNext;
+  final VoidCallback onTogglePlay;
   final VoidCallback onToggleFullscreen;
 
   /// 返回上一页；null 时不显示返回按钮（内嵌模式）。
@@ -68,16 +72,6 @@ class ControlsOverlay extends StatelessWidget {
                 right: 0,
                 child: _TopBar(title: title, onClose: onClose),
               ),
-              Center(
-                child: _CenterControls(
-                  controlsController: controlsController,
-                  videoController: videoController,
-                  hasMultiple: hasMultiple,
-                  onPrevious: onPrevious,
-                  onNext: onNext,
-                  sizes: sizes,
-                ),
-              ),
               Positioned(
                 left: 0,
                 right: 0,
@@ -85,7 +79,12 @@ class ControlsOverlay extends StatelessWidget {
                 child: _BottomBar(
                   controlsController: controlsController,
                   videoController: videoController,
+                  hasMultiple: hasMultiple,
+                  onPrevious: onPrevious,
+                  onNext: onNext,
+                  onTogglePlay: onTogglePlay,
                   onToggleFullscreen: onToggleFullscreen,
+                  sizes: sizes,
                 ),
               ),
             ],
@@ -96,28 +95,28 @@ class ControlsOverlay extends StatelessWidget {
   }
 }
 
-/// 控件触控尺寸（按断点切换，平板/横屏放大热区）。
+/// 底部控制按钮触控尺寸（按断点切换，平板/横屏放大热区）。
 class _ControlSizes {
   const _ControlSizes({
-    required this.side,
     required this.play,
-    required this.gap,
+    required this.side,
+    required this.fullscreen,
   });
 
-  /// 侧边按钮（上一个/下一个）图标尺寸。
-  final double side;
-
-  /// 中央播放/暂停按钮图标尺寸。
+  /// 播放/暂停按钮（圆形，直径）。
   final double play;
 
-  /// 按钮间距。
-  final double gap;
+  /// 上一个/下一个按钮图标尺寸。
+  final double side;
+
+  /// 全屏按钮图标尺寸。
+  final double fullscreen;
 
   /// 手机竖屏。
-  static const compact = _ControlSizes(side: 36, play: 52, gap: 24);
+  static const compact = _ControlSizes(play: 56, side: 32, fullscreen: 28);
 
   /// 平板/横屏（宽度 >= [Breakpoints.compact]）。
-  static const wide = _ControlSizes(side: 44, play: 64, gap: 32);
+  static const wide = _ControlSizes(play: 64, side: 40, fullscreen: 32);
 }
 
 /// 顶部/底部黑色渐变遮罩，保证控件在任何画面背景下可读。
@@ -192,14 +191,16 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-/// 中间的"上一个 / 播放暂停 / 下一个"三连按钮。
-class _CenterControls extends StatelessWidget {
-  const _CenterControls({
+/// 底部：进度条 + 控制按钮（上一/播放/下一 + 全屏）。
+class _BottomBar extends StatelessWidget {
+  const _BottomBar({
     required this.controlsController,
     required this.videoController,
     required this.hasMultiple,
     required this.onPrevious,
     required this.onNext,
+    required this.onTogglePlay,
+    required this.onToggleFullscreen,
     required this.sizes,
   });
 
@@ -208,74 +209,9 @@ class _CenterControls extends StatelessWidget {
   final bool hasMultiple;
   final VoidCallback onPrevious;
   final VoidCallback onNext;
-  final _ControlSizes sizes;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (hasMultiple) ...[
-          _CircleIconButton(
-            icon: LucideIcons.skip_back,
-            size: sizes.side,
-            onPressed: () {
-              // holdVisible 取消自动隐藏计时，随后 _loadIndex 会统一重置
-              controlsController.holdVisible();
-              onPrevious();
-            },
-          ),
-          SizedBox(width: sizes.gap),
-        ],
-        ValueListenableBuilder<VideoPlayerValue>(
-          valueListenable: videoController,
-          builder: (context, value, child) {
-            return _CircleIconButton(
-              icon: value.isPlaying ? LucideIcons.pause : LucideIcons.play,
-              size: sizes.play,
-              onPressed: () {
-                controlsController.holdVisible();
-                if (value.isPlaying) {
-                  videoController.pause();
-                } else {
-                  // 播放结束时点播放 = 从头重播
-                  if (value.duration > Duration.zero &&
-                      value.position >= value.duration) {
-                    videoController.seekTo(Duration.zero);
-                  }
-                  videoController.play();
-                }
-                controlsController.releaseHold();
-              },
-            );
-          },
-        ),
-        if (hasMultiple) ...[
-          SizedBox(width: sizes.gap),
-          _CircleIconButton(
-            icon: LucideIcons.skip_forward,
-            size: sizes.side,
-            onPressed: () {
-              controlsController.holdVisible();
-              onNext();
-            },
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _BottomBar extends StatelessWidget {
-  const _BottomBar({
-    required this.controlsController,
-    required this.videoController,
-    required this.onToggleFullscreen,
-  });
-
-  final VideoControlsController controlsController;
-  final VideoPlayerController videoController;
+  final VoidCallback onTogglePlay;
   final VoidCallback onToggleFullscreen;
+  final _ControlSizes sizes;
 
   @override
   Widget build(BuildContext context) {
@@ -286,27 +222,59 @@ class _BottomBar extends StatelessWidget {
         top: AppSpacing.xl,
         bottom: MediaQuery.paddingOf(context).bottom + AppSpacing.sm,
         left: AppSpacing.sm,
-        right: AppSpacing.xs,
+        right: AppSpacing.sm,
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: VideoProgressBar(
-              controller: videoController,
-              onDragStart: controlsController.holdVisible,
-              onDragEnd: controlsController.releaseHold,
-            ),
+          VideoProgressBar(
+            controller: videoController,
+            onDragStart: controlsController.holdVisible,
+            onDragEnd: controlsController.releaseHold,
           ),
-          IconButton(
-            icon: Icon(
-              isLandscape ? LucideIcons.minimize : LucideIcons.maximize,
-              color: Colors.white,
-            ),
-            onPressed: () {
-              controlsController.holdVisible();
-              onToggleFullscreen();
-              controlsController.releaseHold();
-            },
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              if (hasMultiple)
+                _IconButton(
+                  icon: LucideIcons.skip_back,
+                  size: sizes.side,
+                  onPressed: () {
+                    controlsController.holdVisible();
+                    onPrevious();
+                  },
+                ),
+              if (hasMultiple) const SizedBox(width: AppSpacing.md),
+              _PlayButton(
+                videoController: videoController,
+                size: sizes.play,
+                onPressed: () {
+                  controlsController.holdVisible();
+                  onTogglePlay();
+                  controlsController.releaseHold();
+                },
+              ),
+              if (hasMultiple) const SizedBox(width: AppSpacing.md),
+              if (hasMultiple)
+                _IconButton(
+                  icon: LucideIcons.skip_forward,
+                  size: sizes.side,
+                  onPressed: () {
+                    controlsController.holdVisible();
+                    onNext();
+                  },
+                ),
+              const Spacer(),
+              _IconButton(
+                icon: isLandscape ? LucideIcons.minimize : LucideIcons.maximize,
+                size: sizes.fullscreen,
+                onPressed: () {
+                  controlsController.holdVisible();
+                  onToggleFullscreen();
+                  controlsController.releaseHold();
+                },
+              ),
+            ],
           ),
         ],
       ),
@@ -314,8 +282,47 @@ class _BottomBar extends StatelessWidget {
   }
 }
 
-class _CircleIconButton extends StatelessWidget {
-  const _CircleIconButton({
+/// 播放/暂停按钮：圆形半透明背景，突出主操作。
+class _PlayButton extends StatelessWidget {
+  const _PlayButton({
+    required this.videoController,
+    required this.size,
+    required this.onPressed,
+  });
+
+  final VideoPlayerController videoController;
+  final double size;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<VideoPlayerValue>(
+      valueListenable: videoController,
+      builder: (context, value, child) {
+        return Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: Colors.black45,
+            shape: BoxShape.circle,
+          ),
+          child: IconButton(
+            icon: Icon(
+              value.isPlaying ? LucideIcons.pause : LucideIcons.play,
+              color: Colors.white,
+            ),
+            iconSize: size * 0.5,
+            onPressed: onPressed,
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 普通图标按钮（上一个/下一个/全屏）。
+class _IconButton extends StatelessWidget {
+  const _IconButton({
     required this.icon,
     required this.size,
     required this.onPressed,
