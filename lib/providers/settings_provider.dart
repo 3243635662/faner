@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/file_view_mode.dart';
+import '../core/video_play_mode.dart';
 
 class SettingsState {
   const SettingsState({
@@ -11,30 +12,35 @@ class SettingsState {
     required this.serverEnabled,
     required this.themeMode,
     required this.viewMode,
+    required this.videoPlayMode,
   });
 
   const SettingsState.initial()
       : deviceName = '',
         serverEnabled = true,
         themeMode = ThemeMode.system,
-        viewMode = FileViewMode.list;
+        viewMode = FileViewMode.list,
+        videoPlayMode = VideoPlayMode.sequential;
 
   final String deviceName;
   final bool serverEnabled;
   final ThemeMode themeMode;
   final FileViewMode viewMode;
+  final VideoPlayMode videoPlayMode;
 
   SettingsState copyWith({
     String? deviceName,
     bool? serverEnabled,
     ThemeMode? themeMode,
     FileViewMode? viewMode,
+    VideoPlayMode? videoPlayMode,
   }) =>
       SettingsState(
         deviceName: deviceName ?? this.deviceName,
         serverEnabled: serverEnabled ?? this.serverEnabled,
         themeMode: themeMode ?? this.themeMode,
         viewMode: viewMode ?? this.viewMode,
+        videoPlayMode: videoPlayMode ?? this.videoPlayMode,
       );
 }
 
@@ -43,6 +49,7 @@ class SettingsNotifier extends Notifier<SettingsState> {
   static const _kServerEnabled = 'server_enabled';
   static const _kThemeMode = 'theme_mode';
   static const _kViewMode = 'view_mode';
+  static const _kVideoPlayMode = 'video_play_mode';
 
   Future<void>? _loaded;
 
@@ -69,6 +76,11 @@ class SettingsNotifier extends Notifier<SettingsState> {
         prefs.getString(_kViewMode),
         FileViewMode.list,
       );
+      final videoPlayMode = _enumFromName(
+        VideoPlayMode.values,
+        prefs.getString(_kVideoPlayMode),
+        VideoPlayMode.sequential,
+      );
       final finalName = (name == null || name.isEmpty)
           ? await _defaultDeviceName()
           : name;
@@ -77,6 +89,7 @@ class SettingsNotifier extends Notifier<SettingsState> {
         serverEnabled: enabled,
         themeMode: themeMode,
         viewMode: viewMode,
+        videoPlayMode: videoPlayMode,
       );
     } catch (_) {
       state = SettingsState(
@@ -84,6 +97,7 @@ class SettingsNotifier extends Notifier<SettingsState> {
         serverEnabled: true,
         themeMode: ThemeMode.system,
         viewMode: FileViewMode.list,
+        videoPlayMode: VideoPlayMode.sequential,
       );
     }
   }
@@ -133,6 +147,12 @@ class SettingsNotifier extends Notifier<SettingsState> {
     state = state.copyWith(viewMode: next);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kViewMode, next.name);
+  }
+
+  Future<void> setVideoPlayMode(VideoPlayMode mode) async {
+    state = state.copyWith(videoPlayMode: mode);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kVideoPlayMode, mode.name);
   }
 }
 

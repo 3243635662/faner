@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants.dart';
 import '../../core/prompts.dart';
 import '../../core/tokens.dart';
+import '../../core/video_play_mode.dart';
 import '../../permissions/storage_permission.dart';
 import '../../providers/server_provider.dart';
 import '../../providers/settings_provider.dart';
@@ -43,6 +44,40 @@ class SettingsPage extends ConsumerWidget {
               onSelectionChanged: (selection) => ref
                   .read(settingsProvider.notifier)
                   .setThemeMode(selection.first),
+            ),
+          ),
+          const Divider(),
+          _sectionHeader(context, '播放'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            child: SegmentedButton<VideoPlayMode>(
+              segments: const [
+                ButtonSegment(
+                  value: VideoPlayMode.sequential,
+                  label: Text('顺序'),
+                ),
+                ButtonSegment(
+                  value: VideoPlayMode.shuffle,
+                  label: Text('随机'),
+                ),
+                ButtonSegment(
+                  value: VideoPlayMode.loop,
+                  label: Text('循环'),
+                ),
+              ],
+              selected: {settings.videoPlayMode},
+              onSelectionChanged: (selection) => ref
+                  .read(settingsProvider.notifier)
+                  .setVideoPlayMode(selection.first),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg, AppSpacing.xs, AppSpacing.lg, 0),
+            child: Text(
+              '视频播放完毕后的连播方式（手动切换上一个/下一个不受影响）',
+              style: AppTypography.caption
+                  .copyWith(color: AppPalette.of(context).muted),
             ),
           ),
           const Divider(),
