@@ -17,6 +17,8 @@ class FileListView extends StatelessWidget {
     this.onLongPress,
     this.thumbnailResolver,
     this.selectedPath,
+    this.storageKey,
+    this.onDoubleTap,
   });
 
   final List<FileEntry> entries;
@@ -29,10 +31,20 @@ class FileListView extends StatelessWidget {
   /// 当前选中项路径（平板双栏高亮用）。
   final String? selectedPath;
 
+  /// 滚动位置持久化标识。挂到 [PageStorageKey] 上，使列表在布局切换
+  /// （平板横竖屏双栏↔单栏）与进出目录时保留滚动位置；为空则不持久化。
+  final String? storageKey;
+
+  /// 双击列表项回调（媒体直接全屏沉浸式观看）。
+  final ValueChanged<FileEntry>? onDoubleTap;
+
   @override
   Widget build(BuildContext context) {
     final palette = AppPalette.of(context);
     return ListView.separated(
+      key: storageKey == null
+          ? null
+          : PageStorageKey<String>('list:$storageKey'),
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       physics: const AlwaysScrollableScrollPhysics(),
       itemCount: entries.length,
@@ -50,6 +62,7 @@ class FileListView extends StatelessWidget {
             iconSize: 40,
           ),
           onTap: () => onTap(entry),
+          onDoubleTap: onDoubleTap == null ? null : () => onDoubleTap!(entry),
           onLongPress: onLongPress == null ? null : () => onLongPress!(entry),
         );
       },
@@ -62,6 +75,7 @@ class _FileListTile extends StatelessWidget {
     required this.entry,
     required this.thumbnail,
     required this.onTap,
+    this.onDoubleTap,
     this.onLongPress,
     this.selected = false,
   });
@@ -69,6 +83,7 @@ class _FileListTile extends StatelessWidget {
   final FileEntry entry;
   final Widget thumbnail;
   final VoidCallback onTap;
+  final VoidCallback? onDoubleTap;
   final VoidCallback? onLongPress;
   final bool selected;
 
@@ -80,6 +95,7 @@ class _FileListTile extends StatelessWidget {
         : '${entry.formattedSize} · ${formatDateTime(entry.modifiedAt)}';
     return InkWell(
       onTap: onTap,
+      onDoubleTap: onDoubleTap,
       onLongPress: onLongPress,
       child: Container(
         color: selected ? palette.brand.withValues(alpha: 0.08) : null,

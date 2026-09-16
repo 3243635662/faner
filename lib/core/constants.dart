@@ -11,7 +11,7 @@ class AppConstants {
   /// mDNS 服务类型（自定义，避免扫到无关 HTTP 服务）。
   static const String serviceType = '_lanmedia._tcp';
 
-  static const String appVersion = '1.0.0';
+  static const String appVersion = '2.1.1';
 
   /// 共享根目录展示名。
   static const String sharedRootLabel = '内部存储';

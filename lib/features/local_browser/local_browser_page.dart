@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../core/constants.dart';
 import '../../core/file_type.dart';
@@ -94,6 +96,24 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
     _openMedia(entry, allEntries);
   }
 
+  /// 双击列表项：媒体跳过右侧预览、直接全屏沉浸式观看；文件夹退回单击行为。
+  /// 单击=右侧预览、双击=直接全屏，兼顾不同使用习惯。
+  void _onDoubleTapEntry(
+    FileEntry entry,
+    bool isWide,
+    List<FileEntry> allEntries,
+  ) {
+    if (entry.isFolder) {
+      _onTapEntry(entry, isWide, allEntries);
+      return;
+    }
+    // 双击直接全屏前，先取消当前选中（停掉右侧内嵌播放器），避免双音源
+    if (isWide) {
+      ref.read(selectedEntryProvider.notifier).select(null);
+    }
+    _openMedia(entry, allEntries, fromSplit: isWide);
+  }
+
   void _openMedia(
     FileEntry entry,
     List<FileEntry> allEntries, {
@@ -118,7 +138,7 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
           extra: (items: sources, index: index, fromSplit: fromSplit),
         );
       case EntryType.audio:
-        context.push('/audio', extra: sources[index]);
+        _showSnack('暂不支持播放音频文件');
       case EntryType.folder:
       case EntryType.other:
         _showSnack('暂不支持预览该文件');
@@ -230,6 +250,7 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
   void _handleOpResult(Result<void> result, String successMsg) {
     result.fold(
       (_) {
+        HapticFeedback.mediumImpact();
         _showSnack(successMsg);
         ref.invalidate(localBrowserProvider);
       },
@@ -238,6 +259,7 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
   }
 
   void _showEntryActions(FileEntry entry) {
+    HapticFeedback.lightImpact();
     showModalBottomSheet<void>(
       context: context,
       builder: (ctx) {
@@ -261,6 +283,14 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
                 },
               ),
               ListTile(
+                leading: const Icon(LucideIcons.share_2),
+                title: const Text('分享'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _share(entry);
+                },
+              ),
+              ListTile(
                 leading: Icon(LucideIcons.trash, color: palette.red),
                 title: Text('删除', style: TextStyle(color: palette.red)),
                 onTap: () {
@@ -273,6 +303,17 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
         );
       },
     );
+  }
+
+  /// 通过系统分享面板分享本地文件。
+  Future<void> _share(FileEntry entry) async {
+    try {
+      await SharePlus.instance.share(
+        ShareParams(files: [XFile(_absolute(entry.path))], subject: entry.name),
+      );
+    } catch (_) {
+      _showSnack('分享失败');
+    }
   }
 
   // ---- UI ----
@@ -503,7 +544,9 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
           onRefresh: () =>
               ref.refresh(localBrowserProvider(path).future).then((_) {}),
           child: _fileView(filtered, isWide,
-              selectedPath: selectedPath, onLongPress: _showEntryActions),
+              selectedPath: selectedPath,
+              storageKey: 'local:$path',
+              onLongPress: _showEntryActions),
         );
       },
       loading: () => mode == FileViewMode.list
@@ -517,6 +560,7 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
     List<FileEntry> entries,
     bool isWide, {
     String? selectedPath,
+    String? storageKey,
     ValueChanged<FileEntry>? onLongPress,
   }) {
     final mode = ref.watch(settingsProvider.select((s) => s.viewMode));
@@ -526,7 +570,9 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
         fileResolver: _absoluteOf,
         isRemote: false,
         selectedPath: selectedPath,
+        storageKey: storageKey,
         onTap: (e) => _onTapEntry(e, isWide, entries),
+        onDoubleTap: (e) => _onDoubleTapEntry(e, isWide, entries),
         onLongPress: onLongPress,
       );
     }
@@ -535,7 +581,9 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
       fileResolver: _absoluteOf,
       isRemote: false,
       selectedPath: selectedPath,
+      storageKey: storageKey,
       onTap: (e) => _onTapEntry(e, isWide, entries),
+      onDoubleTap: (e) => _onDoubleTapEntry(e, isWide, entries),
       onLongPress: onLongPress,
     );
   }

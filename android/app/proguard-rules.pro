@@ -24,3 +24,8 @@
 # --- flutter_foreground_task（前台服务） ---
 -keep class com.pravera.flutter_foreground_task.** { *; }
 -dontwarn com.pravera.flutter_foreground_task.**
+
+# --- media_kit / media_kit_video（视频播放内核） ---
+# libmpv 通过 JNI 与插件通道协同工作，release 下保留其附属类避免被 R8 改写。
+-keep class com.alexmercerind.media_kit_video.** { *; }
+-dontwarn com.alexmercerind.media_kit_video.**

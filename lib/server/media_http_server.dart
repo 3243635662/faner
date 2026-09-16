@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 import '../core/constants.dart';
 import '../data/local/local_file_service.dart';
 import 'router.dart';
@@ -57,6 +59,7 @@ class MediaHttpServer {
         if (_server == server) _server = null;
       },
     );
+    debugPrint('[Faner] HTTP 服务器已启动：端口 ${server.port}，根目录 $root');
     return server.port;
   }
 

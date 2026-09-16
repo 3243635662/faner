@@ -4,8 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/constants.dart';
 import '../../core/prompts.dart';
+import '../../core/seek_sensitivity.dart';
 import '../../core/tokens.dart';
 import '../../core/video_play_mode.dart';
+import '../../core/video_resume.dart';
 import '../../permissions/storage_permission.dart';
 import '../../providers/server_provider.dart';
 import '../../providers/settings_provider.dart';
@@ -79,6 +81,71 @@ class SettingsPage extends ConsumerWidget {
               style: AppTypography.caption
                   .copyWith(color: AppPalette.of(context).muted),
             ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            child: SegmentedButton<double>(
+              segments: const [
+                ButtonSegment(value: 1.5, label: Text('1.5x')),
+                ButtonSegment(value: 2.0, label: Text('2x')),
+                ButtonSegment(value: 3.0, label: Text('3x')),
+              ],
+              selected: {settings.longPressSpeed},
+              onSelectionChanged: (selection) => ref
+                  .read(settingsProvider.notifier)
+                  .setLongPressSpeed(selection.first),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg, AppSpacing.xs, AppSpacing.lg, 0),
+            child: Text(
+              '视频长按播放区域的倍速',
+              style: AppTypography.caption
+                  .copyWith(color: AppPalette.of(context).muted),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            child: SegmentedButton<SeekSensitivity>(
+              segments: [
+                for (final sensitivity in SeekSensitivity.values)
+                  ButtonSegment(
+                    value: sensitivity,
+                    label: Text(sensitivity.label),
+                  ),
+              ],
+              selected: {settings.seekSensitivity},
+              onSelectionChanged: (selection) => ref
+                  .read(settingsProvider.notifier)
+                  .setSeekSensitivity(selection.first),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg, AppSpacing.xs, AppSpacing.lg, 0),
+            child: Text(
+              '左右滑动快进/后退的灵敏度 · 当前轻扫 1 厘米约跳转 '
+              '${settings.seekSensitivity.secondsPerCentimeter} 秒',
+              style: AppTypography.caption
+                  .copyWith(color: AppPalette.of(context).muted),
+            ),
+          ),
+          SwitchListTile(
+            secondary: const Icon(LucideIcons.clock),
+            title: const Text('记住播放进度'),
+            subtitle: const Text('视频断点续播'),
+            value: settings.rememberProgress,
+            onChanged: (v) => ref
+                .read(settingsProvider.notifier)
+                .setRememberProgress(v),
+          ),
+          _tile(
+            context,
+            icon: LucideIcons.eraser,
+            title: '清除播放进度',
+            subtitle: '清除所有视频的断点记忆',
+            onTap: () => _clearResume(context),
           ),
           const Divider(),
           _sectionHeader(context, '设备'),
@@ -165,6 +232,15 @@ class SettingsPage extends ConsumerWidget {
     if (server.status == ServerStatus.running) {
       await ref.read(serverControllerProvider.notifier).stop();
       await ref.read(serverControllerProvider.notifier).start();
+    }
+  }
+
+  Future<void> _clearResume(BuildContext context) async {
+    await VideoResumeStore.clearAll();
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已清除播放进度')),
+      );
     }
   }
 

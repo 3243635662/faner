@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../core/result.dart';
 import '../models/device_info.dart';
@@ -65,6 +66,10 @@ class RemoteFileClient {
           .map((e) => FileEntry.fromJson(e as Map<String, dynamic>))
           .toList());
     } on DioException catch (e) {
+      debugPrint(
+        '[Faner] 请求列表失败 ${device.baseUrl}/api/list?path=$path → '
+        '${e.type} (${e.message})',
+      );
       return Err(_friendlyError(e));
     } catch (e) {
       return Err('读取失败：$e');

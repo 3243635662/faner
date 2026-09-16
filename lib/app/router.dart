@@ -4,10 +4,9 @@ import 'package:go_router/go_router.dart';
 import '../data/models/device_info.dart';
 import '../features/devices/devices_page.dart';
 import '../features/local_browser/local_browser_page.dart';
-import '../features/media_viewer/audio_player_page.dart';
+import '../features/media_player/pages/video_player_page.dart';
 import '../features/media_viewer/image_viewer_page.dart';
 import '../features/media_viewer/media_source.dart';
-import '../features/media_viewer/video_player_page.dart';
 import '../features/remote_browser/remote_browser_page.dart';
 import '../features/settings/settings_page.dart';
 import '../home/home_shell.dart';
@@ -94,13 +93,6 @@ final GoRouter appRouter = GoRouter(
           initialIndex: extra.index,
           fromSplit: extra.fromSplit,
         );
-      },
-    ),
-    GoRoute(
-      path: '/audio',
-      builder: (context, state) {
-        final source = state.extra! as MediaSource;
-        return AudioPlayerPage(source: source);
       },
     ),
   ],

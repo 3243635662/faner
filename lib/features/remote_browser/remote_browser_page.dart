@@ -45,6 +45,14 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
   bool _ascending = false;
 
   @override
+  void initState() {
+    super.initState();
+    // 关键：remotePathProvider 是全局共享的，进入新设备时必须重置到根目录，
+    // 否则会沿用上一台设备的残留路径（导致目录不存在 / 一直加载）。
+    ref.read(remotePathProvider.notifier).set('');
+  }
+
+  @override
   void dispose() {
     _debounce?.cancel();
     _searchController.dispose();
@@ -73,6 +81,23 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
     _openMedia(entry, allEntries);
   }
 
+  /// 双击列表项：媒体跳过右侧预览、直接全屏沉浸式观看；文件夹退回单击行为。
+  void _onDoubleTapEntry(
+    FileEntry entry,
+    bool isWide,
+    List<FileEntry> allEntries,
+  ) {
+    if (entry.isFolder) {
+      _onTap(entry, isWide, allEntries);
+      return;
+    }
+    // 双击直接全屏前，先取消当前选中（停掉右侧内嵌播放器），避免双音源
+    if (isWide) {
+      setState(() => _selected = null);
+    }
+    _openMedia(entry, allEntries, fromSplit: isWide);
+  }
+
   void _openMedia(
     FileEntry entry,
     List<FileEntry> allEntries, {
@@ -97,7 +122,7 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
           extra: (items: sources, index: index, fromSplit: fromSplit),
         );
       case EntryType.audio:
-        context.push('/audio', extra: sources[index]);
+        _showSnack('暂不支持播放音频文件');
       case EntryType.folder:
       case EntryType.other:
         _showSnack('暂不支持预览该文件');
@@ -370,7 +395,8 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
         return RefreshIndicator(
           onRefresh: () =>
               ref.refresh(remoteBrowserProvider(key).future).then((_) {}),
-          child: _fileView(filtered, isWide, selectedPath: selectedPath),
+          child: _fileView(filtered, isWide,
+              selectedPath: selectedPath, storageKey: 'remote:$path'),
         );
       },
       loading: () => mode == FileViewMode.list
@@ -384,6 +410,7 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
     List<FileEntry> entries,
     bool isWide, {
     String? selectedPath,
+    String? storageKey,
   }) {
     final mode = ref.watch(settingsProvider.select((s) => s.viewMode));
     if (mode == FileViewMode.list) {
@@ -393,7 +420,9 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
         thumbnailResolver: _thumbUrl,
         isRemote: true,
         selectedPath: selectedPath,
+        storageKey: storageKey,
         onTap: (e) => _onTap(e, isWide, entries),
+        onDoubleTap: (e) => _onDoubleTapEntry(e, isWide, entries),
       );
     }
     return FileGridView(
@@ -402,7 +431,9 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
       thumbnailResolver: _thumbUrl,
       isRemote: true,
       selectedPath: selectedPath,
+      storageKey: storageKey,
       onTap: (e) => _onTap(e, isWide, entries),
+      onDoubleTap: (e) => _onDoubleTapEntry(e, isWide, entries),
     );
   }
 

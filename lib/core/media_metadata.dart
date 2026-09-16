@@ -1,6 +1,4 @@
-import 'dart:io';
-
-import 'package:video_player/video_player.dart';
+import 'package:media_kit/media_kit.dart';
 
 /// 本地媒体元数据（时长）获取，用于文件列表角标。
 ///
@@ -8,15 +6,35 @@ import 'package:video_player/video_player.dart';
 /// 带内存缓存 + 失败静默降级（返回 null，UI 隐藏角标）。
 final Map<String, Duration> _videoDurationCache = {};
 
+/// 探测任务串行队列。
+///
+/// media_kit 的 `Player` 会创建原生解码实例，成本不低；列表快速滚动时
+/// 若并发拉起多个实例会明显抢占资源，因此这里把探测串行化。
+Future<void> _probeQueue = Future<void>.value();
+
 /// 获取本地视频时长；失败返回 null。
-Future<Duration?> fetchVideoDuration(String path) async {
+Future<Duration?> fetchVideoDuration(String path) {
+  final cached = _videoDurationCache[path];
+  if (cached != null) return Future.value(cached);
+  final task = _probeQueue.then((_) => _probe(path));
+  _probeQueue = task.then<void>((_) {}, onError: (_) {});
+  return task;
+}
+
+Future<Duration?> _probe(String path) async {
   final cached = _videoDurationCache[path];
   if (cached != null) return cached;
-  VideoPlayerController? controller;
+
+  final player = Player();
   try {
-    controller = VideoPlayerController.file(File(path));
-    await controller.initialize();
-    final duration = controller.value.duration;
+    await player.open(Media(path), play: false);
+    var duration = player.state.duration;
+    if (duration <= Duration.zero) {
+      // 少数容器在 open 返回后稍晚才给出时长，等一小会儿再放弃
+      duration = await player.stream.duration
+          .firstWhere((d) => d > Duration.zero)
+          .timeout(const Duration(seconds: 3), onTimeout: () => Duration.zero);
+    }
     if (duration > Duration.zero) {
       _videoDurationCache[path] = duration;
       return duration;
@@ -25,6 +43,6 @@ Future<Duration?> fetchVideoDuration(String path) async {
   } catch (_) {
     return null;
   } finally {
-    await controller?.dispose();
+    await player.dispose();
   }
 }

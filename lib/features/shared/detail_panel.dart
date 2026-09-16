@@ -4,10 +4,10 @@ import 'package:flutter_lucide/flutter_lucide.dart';
 import '../../core/file_type.dart';
 import '../../core/tokens.dart';
 import '../../data/models/file_entry.dart';
-import '../media_viewer/audio_view.dart';
+import '../media_player/models/media_item.dart';
+import '../media_player/widgets/video_preview_panel.dart';
 import '../media_viewer/image_view.dart';
 import '../media_viewer/media_source.dart';
-import '../media_viewer/video_view.dart';
 
 /// 平板主从布局右侧详情面板，原地预览选中项。
 class DetailPanel extends StatelessWidget {
@@ -75,19 +75,12 @@ class DetailPanel extends StatelessWidget {
           onFullscreen: () => onOpenFullscreen(entry),
         );
       case EntryType.video:
-        return Center(
-          child: VideoView(
-            items: [mediaSourceFor(entry, resolver, isRemote)],
-            initialIndex: 0,
-            embedded: true,
-            fullscreen: false,
-            onToggleFullscreen: () => onOpenFullscreen(entry),
-          ),
+        return VideoPreviewPanel(
+          items: [MediaItem.fromSource(mediaSourceFor(entry, resolver, isRemote))],
+          onOpenFullscreen: () => onOpenFullscreen(entry),
         );
       case EntryType.audio:
-        return Center(
-          child: AudioView(source: mediaSourceFor(entry, resolver, isRemote)),
-        );
+      // 音频文件不提供内置播放，与其它未知类型一样只展示文件信息
       case EntryType.other:
         return Center(
           child: Column(

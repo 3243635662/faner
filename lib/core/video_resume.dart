@@ -28,4 +28,17 @@ class VideoResumeStore {
       // 忽略写入失败
     }
   }
+
+  /// 清除所有视频播放进度（设置页「清除播放进度」用）。
+  static Future<void> clearAll() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keys = prefs.getKeys().where((k) => k.startsWith(_prefix)).toList();
+      for (final k in keys) {
+        await prefs.remove(k);
+      }
+    } catch (_) {
+      // 忽略
+    }
+  }
 }
