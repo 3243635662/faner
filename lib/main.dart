@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+// 后台保活前台服务（让 Server 在锁屏后仍运行）；
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+// 状态管理（全局 Provider 容器根）；
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+// 视频播放内核 libmpv
 import 'package:media_kit/media_kit.dart';
 
 import 'app/app.dart';

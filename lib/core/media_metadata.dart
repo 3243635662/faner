@@ -17,10 +17,12 @@ Future<Duration?> fetchVideoDuration(String path) {
   final cached = _videoDurationCache[path];
   if (cached != null) return Future.value(cached);
   final task = _probeQueue.then((_) => _probe(path));
+  // 使用onError吞掉本次任务的异常，避免阻断队列任务
   _probeQueue = task.then<void>((_) {}, onError: (_) {});
   return task;
 }
 
+// 获取视频时长
 Future<Duration?> _probe(String path) async {
   final cached = _videoDurationCache[path];
   if (cached != null) return cached;
@@ -30,7 +32,9 @@ Future<Duration?> _probe(String path) async {
     await player.open(Media(path), play: false);
     var duration = player.state.duration;
     if (duration <= Duration.zero) {
-      // 少数容器在 open 返回后稍晚才给出时长，等一小会儿再放弃
+      // 少数容器在 open 返回后稍晚才给出时长：当视频时长尚未就绪时，异步等待内核报出真实时长
+      // firstWhere从流里取第一个大于零的值 —— 也就是真正解析出有效时长的那一刻
+      // timeout最多等 3 秒。若超时仍未拿到有效时长，就返回一个 Duration.zero 作为"放弃探测"的哨兵值，避免无限挂起阻塞串行队列。
       duration = await player.stream.duration
           .firstWhere((d) => d > Duration.zero)
           .timeout(const Duration(seconds: 3), onTimeout: () => Duration.zero);

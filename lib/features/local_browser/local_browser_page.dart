@@ -154,6 +154,8 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
       data: (list) => list,
       orElse: () => [entry],
     );
+    // 进入全屏前，先取消当前选中（停掉右侧内嵌播放器），避免双音源
+    ref.read(selectedEntryProvider.notifier).select(null);
     _openMedia(entry, entries, fromSplit: true);
   }
 

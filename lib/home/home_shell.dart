@@ -28,7 +28,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     await ref.read(settingsProvider.notifier).ensureLoaded();
     if (!mounted) return;
     final settings = ref.read(settingsProvider);
-    if (settings.serverEnabled) {
+    if (settings.autoStartServer) {
       ref.read(serverControllerProvider.notifier).start();
     }
   }

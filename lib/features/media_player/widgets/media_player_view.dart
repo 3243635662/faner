@@ -6,6 +6,7 @@ import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/seek_sensitivity.dart';
+import '../../../core/tokens.dart';
 import '../../../providers/settings_provider.dart';
 import '../controllers/media_player_controller.dart';
 import '../controllers/player_controls_controller.dart';
@@ -91,6 +92,11 @@ class _MediaPlayerViewState extends ConsumerState<MediaPlayerView> {
   Timer? _doubleTapTimer;
   double? _speeding;
 
+  // 屏幕锁定状态
+  bool _isLocked = false;
+  bool _showLockedControl = false;
+  Timer? _lockedControlTimer;
+
   int _lastIndex = -1;
 
   MediaPlayerController get _player => widget.controller;
@@ -109,6 +115,7 @@ class _MediaPlayerViewState extends ConsumerState<MediaPlayerView> {
   @override
   void dispose() {
     _doubleTapTimer?.cancel();
+    _lockedControlTimer?.cancel();
     _player.removeListener(_onControllerChanged);
     widget.controls.removeListener(_syncSystemUi);
     super.dispose();
@@ -125,6 +132,9 @@ class _MediaPlayerViewState extends ConsumerState<MediaPlayerView> {
     // 任何"进入新视频"的路径都重置控件为隐藏，避免沿用上一集的显示状态
     if (state.index != _lastIndex) {
       _lastIndex = state.index;
+      _isLocked = false;
+      _showLockedControl = false;
+      _lockedControlTimer?.cancel();
       widget.controls.onEnterPlayer();
     }
     // 播完停在结尾时，把控件交还给用户
@@ -159,12 +169,7 @@ class _MediaPlayerViewState extends ConsumerState<MediaPlayerView> {
       _showDoubleTapHint(PlayerDoubleTapHint.forward);
       unawaited(_player.seekBy(const Duration(seconds: 10)));
     } else {
-      // 中央：播放 / 暂停交替。先按当前状态给提示，再切换。
-      _showDoubleTapHint(
-        _player.state.isPlaying
-            ? PlayerDoubleTapHint.pause
-            : PlayerDoubleTapHint.play,
-      );
+      // 中央：播放 / 暂停交替，直接切换，不在中央显示提示文字以免影响观感。
       unawaited(_player.togglePlay());
     }
   }
@@ -304,6 +309,45 @@ class _MediaPlayerViewState extends ConsumerState<MediaPlayerView> {
     });
   }
 
+  void _toggleLock() {
+    HapticFeedback.mediumImpact();
+    if (_isLocked) {
+      setState(() {
+        _isLocked = false;
+        _showLockedControl = false;
+      });
+      _lockedControlTimer?.cancel();
+      widget.controls.showTemporarily();
+    } else {
+      _endSpeed();
+      setState(() {
+        _isLocked = true;
+        _showLockedControl = true;
+      });
+      widget.controls.onEnterPlayer();
+      _lockedControlTimer?.cancel();
+      _lockedControlTimer = Timer(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _showLockedControl = false);
+      });
+    }
+  }
+
+  void _onTapScreen() {
+    if (_isLocked) {
+      _lockedControlTimer?.cancel();
+      setState(() {
+        _showLockedControl = !_showLockedControl;
+      });
+      if (_showLockedControl) {
+        _lockedControlTimer = Timer(const Duration(seconds: 3), () {
+          if (mounted) setState(() => _showLockedControl = false);
+        });
+      }
+    } else {
+      widget.controls.toggle();
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // UI
   // ---------------------------------------------------------------------------
@@ -314,74 +358,143 @@ class _MediaPlayerViewState extends ConsumerState<MediaPlayerView> {
     _msPerPx = ref
         .watch(settingsProvider.select((s) => s.seekSensitivity))
         .msPerPx;
-    return ListenableBuilder(
-      listenable: _player,
-      builder: (context, _) {
-        final state = _player.state;
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: widget.controls.toggle,
-          onDoubleTapDown: _onDoubleTapDown,
-          onDoubleTap: _onDoubleTap,
-          onLongPressStart: (_) => _startSpeed(),
-          onLongPressEnd: (_) => _endSpeed(),
-          onLongPressCancel: _endSpeed,
-          onHorizontalDragDown: _onHorizontalDragDown,
-          onHorizontalDragStart: _onHorizontalDragStart,
-          onHorizontalDragUpdate: _onHorizontalDragUpdate,
-          onHorizontalDragEnd: _onHorizontalDragEnd,
-          onHorizontalDragCancel: _onHorizontalDragCancel,
-          onVerticalDragStart: _onVerticalDragStart,
-          onVerticalDragUpdate: _onVerticalDragUpdate,
-          onVerticalDragEnd: _onVerticalDragEnd,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              ColoredBox(
-                color: Colors.black,
-                child: Center(child: _buildSurface(state)),
-              ),
-              // 亮度遮罩（无系统亮度权限，用半透明黑层模拟）
-              if (_brightness < 1.0)
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: ColoredBox(
-                      color: Colors.black.withValues(alpha: 1 - _brightness),
+    return PopScope(
+      canPop: !_isLocked,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _isLocked) {
+          setState(() => _showLockedControl = true);
+          _lockedControlTimer?.cancel();
+          _lockedControlTimer = Timer(const Duration(seconds: 3), () {
+            if (mounted) setState(() => _showLockedControl = false);
+          });
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('屏幕已锁定，点击左侧锁图标解锁'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      },
+      child: ListenableBuilder(
+        listenable: _player,
+        builder: (context, _) {
+          final state = _player.state;
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _onTapScreen,
+            onDoubleTapDown: _isLocked ? null : _onDoubleTapDown,
+            onDoubleTap: _isLocked ? null : _onDoubleTap,
+            onLongPressStart: _isLocked ? null : (_) => _startSpeed(),
+            onLongPressEnd: _isLocked ? null : (_) => _endSpeed(),
+            onLongPressCancel: _isLocked ? null : _endSpeed,
+            onHorizontalDragDown: _isLocked ? null : _onHorizontalDragDown,
+            onHorizontalDragStart: _isLocked ? null : _onHorizontalDragStart,
+            onHorizontalDragUpdate: _isLocked ? null : _onHorizontalDragUpdate,
+            onHorizontalDragEnd: _isLocked ? null : _onHorizontalDragEnd,
+            onHorizontalDragCancel: _isLocked ? null : _onHorizontalDragCancel,
+            onVerticalDragStart: _isLocked ? null : _onVerticalDragStart,
+            onVerticalDragUpdate: _isLocked ? null : _onVerticalDragUpdate,
+            onVerticalDragEnd: _isLocked ? null : _onVerticalDragEnd,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                ColoredBox(
+                  color: Colors.black,
+                  child: Center(child: _buildSurface(state)),
+                ),
+                // 亮度遮罩（无系统亮度权限，用半透明黑层模拟）
+                if (_brightness < 1.0)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: ColoredBox(
+                        color: Colors.black.withValues(alpha: 1 - _brightness),
+                      ),
                     ),
                   ),
-                ),
-              PlayerControlsOverlay(
-                controller: _player,
-                controls: widget.controls,
-                title: _player.current?.title ?? '',
-                onClose: widget.onClose,
-                fullscreen: widget.fullscreen,
-                onToggleFullscreen: widget.onToggleFullscreen,
+                if (!_isLocked)
+                  PlayerControlsOverlay(
+                    controller: _player,
+                    controls: widget.controls,
+                    title: _player.current?.title ?? '',
+                    onClose: widget.onClose,
+                    fullscreen: widget.fullscreen,
+                    onToggleFullscreen: widget.onToggleFullscreen,
+                  ),
+                if (!_isLocked && _dragPreview != null && state.isReady)
+                  PlayerIndicators.seekPreview(
+                    preview: _dragPreview!,
+                    duration: state.duration,
+                    anchor: _dragStartPosition,
+                  ),
+                if (!_isLocked && _showBrightness)
+                  PlayerIndicators.adjustBar(
+                    icon: LucideIcons.sun,
+                    value: _brightness,
+                    left: true,
+                    label: '${(_brightness * 100).round()}%',
+                  ),
+                if (!_isLocked && _showVolume)
+                  PlayerIndicators.adjustBar(
+                    icon: LucideIcons.volume_2,
+                    value: _volume,
+                    left: false,
+                    label: '${(_volume * 100).round()}%',
+                  ),
+                if (!_isLocked && _doubleTapHint != null)
+                  PlayerIndicators.doubleTapHint(_doubleTapHint!),
+                if (!_isLocked && _speeding != null)
+                  PlayerIndicators.speedBadge(_speeding!),
+                _buildLockButton(context),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildLockButton(BuildContext context) {
+    if (_isLocked) {
+      return Positioned(
+        left: MediaQuery.paddingOf(context).left + AppSpacing.xl,
+        top: 0,
+        bottom: 0,
+        child: Center(
+          child: IgnorePointer(
+            ignoring: !_showLockedControl,
+            child: AnimatedOpacity(
+              opacity: _showLockedControl ? 1.0 : 0.0,
+              duration: AppMotion.mid,
+              child: _PlayerLockButton(
+                isLocked: true,
+                onTap: _toggleLock,
               ),
-              if (_dragPreview != null && state.isReady)
-                PlayerIndicators.seekPreview(
-                  preview: _dragPreview!,
-                  duration: state.duration,
-                  anchor: _dragStartPosition,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return ValueListenableBuilder<bool>(
+      valueListenable: widget.controls,
+      builder: (context, visible, _) {
+        return Positioned(
+          left: MediaQuery.paddingOf(context).left + AppSpacing.xl,
+          top: 0,
+          bottom: 0,
+          child: Center(
+            child: IgnorePointer(
+              ignoring: !visible,
+              child: AnimatedOpacity(
+                opacity: visible ? 1.0 : 0.0,
+                duration: AppMotion.mid,
+                child: _PlayerLockButton(
+                  isLocked: false,
+                  onTap: _toggleLock,
                 ),
-              if (_showBrightness)
-                PlayerIndicators.adjustBar(
-                  icon: LucideIcons.sun,
-                  value: _brightness,
-                  left: true,
-                  label: '${(_brightness * 100).round()}%',
-                ),
-              if (_showVolume)
-                PlayerIndicators.adjustBar(
-                  icon: LucideIcons.volume_2,
-                  value: _volume,
-                  left: false,
-                  label: '${(_volume * 100).round()}%',
-                ),
-              if (_doubleTapHint != null)
-                PlayerIndicators.doubleTapHint(_doubleTapHint!),
-              if (_speeding != null) PlayerIndicators.speedBadge(_speeding!),
-            ],
+              ),
+            ),
           ),
         );
       },
@@ -425,3 +538,51 @@ class _MediaPlayerViewState extends ConsumerState<MediaPlayerView> {
     );
   }
 }
+
+class _PlayerLockButton extends StatelessWidget {
+  const _PlayerLockButton({
+    required this.isLocked,
+    required this.onTap,
+  });
+
+  final bool isLocked;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: isLocked ? Colors.black87 : Colors.black45,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: isLocked ? const Color(0xFFF59E0B) : Colors.white30,
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: isLocked
+                    ? const Color(0x66F59E0B)
+                    : Colors.black.withValues(alpha: 0.3),
+                blurRadius: 10,
+                spreadRadius: 1,
+              ),
+            ],
+          ),
+          child: Icon(
+            isLocked ? LucideIcons.lock : LucideIcons.lock_open,
+            color: isLocked ? const Color(0xFFF59E0B) : Colors.white,
+            size: 20,
+          ),
+        ),
+      ),
+    );
+  }
+}
+

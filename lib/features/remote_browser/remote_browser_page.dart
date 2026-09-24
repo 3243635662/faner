@@ -139,6 +139,8 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
       data: (list) => list,
       orElse: () => [entry],
     );
+    // 进入全屏前，先取消当前选中（停掉右侧内嵌播放器），避免双音源
+    setState(() => _selected = null);
     _openMedia(entry, entries, fromSplit: true);
   }
 

@@ -65,13 +65,18 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   void dispose() {
     _controller.dispose();
     _controls.dispose();
+    // 页面销毁时无条件还原方向锁定和沉浸模式，
+    // 防止"锁横屏 + 隐状态栏"状态泄漏到调用方页面。
+    unawaited(SystemUiService.restore());
     super.dispose();
   }
 
   Future<void> _toggleFullscreen() async {
     if (widget.fromSplit) {
-      // 从双栏进来的"全屏"语义 = 回到双栏
-      if (context.canPop()) context.pop();
+      // 从双栏进来的"全屏"语义 = 回到双栏；先还原 UI 再 pop，
+      // 确保返回双栏界面时系统栏已经显示出来。
+      await SystemUiService.restore();
+      if (context.mounted && context.canPop()) context.pop();
       return;
     }
     final next = !_fullscreen;
@@ -97,8 +102,8 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
             onToggleFullscreen: _toggleFullscreen,
             onClose: () => context.pop(),
           );
-          // 平板横屏才展示播放列表；全屏时让位给画面
-          final showPlaylist = !_fullscreen &&
+          // 平板横屏才展示播放列表；全屏时或从双栏进入全屏时让位给画面
+          final showPlaylist = !widget.fromSplit && !_fullscreen &&
               Responsive.useSplitLayout(context, constraints.maxWidth);
           if (!showPlaylist) return player;
           return Row(

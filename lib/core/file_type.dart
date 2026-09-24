@@ -9,7 +9,7 @@ extension EntryTypeX on EntryType {
   bool get isMedia => isImage || isVideo || isAudio;
 }
 
-/// 根据文件名（或带路径名）判断文件类型。
+/// 根据文件名（或带路径名）判断文件类型。 （后缀判断Type）
 EntryType fileTypeFromName(String name) {
   final ext = _extension(name);
   if (imageExtensions.contains(ext)) return EntryType.image;
@@ -18,22 +18,47 @@ EntryType fileTypeFromName(String name) {
   return EntryType.other;
 }
 
-/// 后缀 → MIME。未知后缀返回 [fallbackMime]。
-String mimeTypeFor(String name, {String fallback = 'application/octet-stream'}) {
+/// 后缀 → MIME。未知后缀返回 [fallbackMime]。  （后缀转MIME）
+String mimeTypeFor(
+  String name, {
+  String fallback = 'application/octet-stream',
+}) {
   final ext = _extension(name);
   return _mimeByExt[ext] ?? fallback;
 }
 
 const Set<String> imageExtensions = {
-  'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif',
+  'jpg',
+  'jpeg',
+  'png',
+  'gif',
+  'webp',
+  'bmp',
+  'heic',
+  'heif',
 };
 
 const Set<String> videoExtensions = {
-  'mp4', 'mkv', 'mov', 'avi', 'webm', 'ts', 'm4v', '3gp', 'flv',
+  'mp4',
+  'mkv',
+  'mov',
+  'avi',
+  'webm',
+  'ts',
+  'm4v',
+  '3gp',
+  'flv',
 };
 
 const Set<String> audioExtensions = {
-  'mp3', 'm4a', 'aac', 'flac', 'wav', 'ogg', 'opus', 'wma',
+  'mp3',
+  'm4a',
+  'aac',
+  'flac',
+  'wav',
+  'ogg',
+  'opus',
+  'wma',
 };
 
 const Map<String, String> _mimeByExt = {
@@ -64,8 +89,10 @@ const Map<String, String> _mimeByExt = {
   'wma': 'audio/x-ms-wma',
 };
 
+// 取文件后缀
 String _extension(String name) {
   final idx = name.lastIndexOf('.');
+  // 这里是处理隐藏文件
   if (idx <= 0 || idx == name.length - 1) return '';
   return name.substring(idx + 1).toLowerCase();
 }

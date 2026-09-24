@@ -11,6 +11,7 @@ class SettingsState {
   const SettingsState({
     required this.deviceName,
     required this.serverEnabled,
+    required this.autoStartServer,
     required this.themeMode,
     required this.viewMode,
     required this.videoPlayMode,
@@ -21,7 +22,8 @@ class SettingsState {
 
   const SettingsState.initial()
       : deviceName = '',
-        serverEnabled = true,
+        serverEnabled = false,
+        autoStartServer = false,
         themeMode = ThemeMode.system,
         viewMode = FileViewMode.list,
         videoPlayMode = VideoPlayMode.sequential,
@@ -31,6 +33,10 @@ class SettingsState {
 
   final String deviceName;
   final bool serverEnabled;
+
+  /// 下次进入应用时是否自动开启局域网共享。
+  final bool autoStartServer;
+
   final ThemeMode themeMode;
   final FileViewMode viewMode;
   final VideoPlayMode videoPlayMode;
@@ -47,6 +53,7 @@ class SettingsState {
   SettingsState copyWith({
     String? deviceName,
     bool? serverEnabled,
+    bool? autoStartServer,
     ThemeMode? themeMode,
     FileViewMode? viewMode,
     VideoPlayMode? videoPlayMode,
@@ -57,6 +64,7 @@ class SettingsState {
       SettingsState(
         deviceName: deviceName ?? this.deviceName,
         serverEnabled: serverEnabled ?? this.serverEnabled,
+        autoStartServer: autoStartServer ?? this.autoStartServer,
         themeMode: themeMode ?? this.themeMode,
         viewMode: viewMode ?? this.viewMode,
         videoPlayMode: videoPlayMode ?? this.videoPlayMode,
@@ -69,6 +77,7 @@ class SettingsState {
 class SettingsNotifier extends Notifier<SettingsState> {
   static const _kDeviceName = 'device_name';
   static const _kServerEnabled = 'server_enabled';
+  static const _kAutoStartServer = 'auto_start_server';
   static const _kThemeMode = 'theme_mode';
   static const _kViewMode = 'view_mode';
   static const _kVideoPlayMode = 'video_play_mode';
@@ -90,7 +99,9 @@ class SettingsNotifier extends Notifier<SettingsState> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final name = prefs.getString(_kDeviceName);
-      final enabled = prefs.getBool(_kServerEnabled) ?? true;
+      final autoStart = prefs.getBool(_kAutoStartServer) ?? false;
+      // 若开启了自启，则本次会话默认启用；否则默认关闭
+      final enabled = prefs.getBool(_kServerEnabled) ?? autoStart;
       final themeMode = _enumFromName(
         ThemeMode.values,
         prefs.getString(_kThemeMode),
@@ -119,6 +130,7 @@ class SettingsNotifier extends Notifier<SettingsState> {
       state = SettingsState(
         deviceName: finalName,
         serverEnabled: enabled,
+        autoStartServer: autoStart,
         themeMode: themeMode,
         viewMode: viewMode,
         videoPlayMode: videoPlayMode,
@@ -129,7 +141,8 @@ class SettingsNotifier extends Notifier<SettingsState> {
     } catch (_) {
       state = SettingsState(
         deviceName: await _defaultDeviceName(),
-        serverEnabled: true,
+        serverEnabled: false,
+        autoStartServer: false,
         themeMode: ThemeMode.system,
         viewMode: FileViewMode.list,
         videoPlayMode: VideoPlayMode.sequential,
@@ -170,6 +183,12 @@ class SettingsNotifier extends Notifier<SettingsState> {
     state = state.copyWith(serverEnabled: enabled);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kServerEnabled, enabled);
+  }
+
+  Future<void> setAutoStartServer(bool value) async {
+    state = state.copyWith(autoStartServer: value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kAutoStartServer, value);
   }
 
   Future<void> setThemeMode(ThemeMode mode) async {
