@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -28,6 +29,8 @@ class FileThumbnail extends StatelessWidget {
   /// [thumbnailResolver] 远程视频缩略图解析器（可选）；
   ///                     仅 isRemote==true 且服务端能提供缩略图 URL 时使用，
   ///                     为 null 时远程视频退化为类型图标。
+  /// [thumbnailLoader]   远程缩略图「批量装载器」（可选，优先于 [thumbnailResolver]）；
+  ///                     一屏几十张图会被合并成极少数批量请求，弱网下显著更快。
   /// [iconSize]          退化图标（文件夹/音频等）的边长尺寸，默认 44。
   /// [showMeta]          是否在右下角叠加元数据角标（目前仅本地视频显示时长），默认 false。
   const FileThumbnail({
@@ -36,6 +39,7 @@ class FileThumbnail extends StatelessWidget {
     required this.fileResolver,
     required this.isRemote,
     this.thumbnailResolver,
+    this.thumbnailLoader,
     this.iconSize = 44,
     this.showMeta = false,
   });
@@ -55,6 +59,9 @@ class FileThumbnail extends StatelessWidget {
   /// 为 null 时远程视频将退化为类型图标。
   final String Function(FileEntry)? thumbnailResolver;
 
+  /// 远程缩略图批量装载器（可选，优先于 [thumbnailResolver]）。
+  final Future<Uint8List?> Function(FileEntry)? thumbnailLoader;
+
   /// 退化图标（文件夹/音频等）的边长尺寸，默认 44。
   final double iconSize;
 
@@ -68,16 +75,16 @@ class FileThumbnail extends StatelessWidget {
 
     // —— 图片类型 ——
     if (entry.type == EntryType.image) {
-      final url = fileResolver(entry);
+      final heroUrl = fileResolver(entry);
       return Hero(
         // Hero 动画 tag，用于点击图片放大到详情页时的共享元素过渡。
-        tag: 'img_$url',
+        tag: 'img_$heroUrl',
         child: isRemote
-            // 远程图片：走网络缓存组件，磁盘 + 内存双缓存。
-            ? _network(url, palette)
+            // 远程图片：优先走批量缩略图（几十KB），避免下载几MB原图撑爆局域网
+            ? _remoteThumb(palette, 'img:${entry.path}')
             // 本地图片：直接读文件，cacheWidth/Height 限制解码尺寸以省内存。
             : Image.file(
-                File(url),
+                File(heroUrl),
                 fit: BoxFit.cover,
                 cacheWidth: 240,
                 cacheHeight: 240,
@@ -90,7 +97,10 @@ class FileThumbnail extends StatelessWidget {
     // —— 视频类型 ——
     if (entry.type == EntryType.video) {
       if (isRemote) {
-        // 远程视频：若服务端提供了缩略图 URL 则显示，否则退化。
+        // 远程视频：缩略图由服务端生成；有装载器时走批量，否则退回单张 URL。
+        if (thumbnailLoader != null) {
+          return _remoteThumb(palette, 'video:${entry.path}');
+        }
         final resolver = thumbnailResolver;
         if (resolver != null) {
           return _network(resolver(entry), palette);
@@ -118,6 +128,25 @@ class FileThumbnail extends StatelessWidget {
 
     // —— 其他（文件夹 / 音频 / 未知）—— 退化为类型图标。
     return _fallback(palette);
+  }
+
+  /// 远程缩略图渲染：优先走批量装载器，未提供时退回单张网络请求。
+  Widget _remoteThumb(AppPalette palette, String entryKey) {
+    final loader = thumbnailLoader;
+    if (loader != null) {
+      return _RemoteThumb(
+        entryKey: entryKey,
+        load: () => loader(entry),
+        fallback: _fallback(palette),
+        placeholder: palette.panel2,
+      );
+    }
+    // 无装载器：退回单张缩略图（图片直接用缩略图接口，视频需解析器）。
+    final url = entry.type == EntryType.image
+        ? (thumbnailResolver?.call(entry) ?? fileResolver(entry))
+        : thumbnailResolver?.call(entry);
+    if (url == null) return _fallback(palette);
+    return _network(url, palette);
   }
 
   /// 远程资源通用渲染：网络图片 + 缓存 + 占位/错误兜底。
@@ -203,6 +232,69 @@ class _Badge extends StatelessWidget {
           fontSize: 11,
         ),
       ),
+    );
+  }
+}
+
+/// 远程缩略图（字节流）渲染。
+///
+/// 用 [FutureBuilder] 驱动，但把 Future 缓存在 State 中：否则每次重建都会
+/// 触发新的请求，滚动列表时会形成雪崩式重复拉取。
+class _RemoteThumb extends StatefulWidget {
+  const _RemoteThumb({
+    required this.entryKey,
+    required this.load,
+    required this.fallback,
+    required this.placeholder,
+  });
+
+  /// 条目稳定标识；变化时才重新拉取。
+  final String entryKey;
+  final Future<Uint8List?> Function() load;
+  final Widget fallback;
+  final Color placeholder;
+
+  @override
+  State<_RemoteThumb> createState() => _RemoteThumbState();
+}
+
+class _RemoteThumbState extends State<_RemoteThumb> {
+  late Future<Uint8List?> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = widget.load();
+  }
+
+  @override
+  void didUpdateWidget(_RemoteThumb oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.entryKey != widget.entryKey) {
+      _future = widget.load();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Uint8List?>(
+      future: _future,
+      builder: (context, snapshot) {
+        final bytes = snapshot.data;
+        if (bytes != null) {
+          return Image.memory(
+            bytes,
+            fit: BoxFit.cover,
+            // 切换/重建时保留上一帧，避免闪烁。
+            gaplessPlayback: true,
+            errorBuilder: (_, _, _) => widget.fallback,
+          );
+        }
+        if (snapshot.connectionState == ConnectionState.done) {
+          return widget.fallback;
+        }
+        return ColoredBox(color: widget.placeholder);
+      },
     );
   }
 }

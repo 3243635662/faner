@@ -16,7 +16,9 @@ Future<void> handleList(HttpRequest request, ServerContext ctx) async {
   result.fold(
     (entries) => writeJson(request, {
       'currentPath': path,
-      'entries': entries.map((e) => e.toJson()).toList(),
+      // 紧凑线格式：省略冗余的 path（客户端用 currentPath + name 拼接）、
+      // 时间戳用 epoch 毫秒。3000+ 条目下可再省 30%~40% 原始体积。
+      'entries': entries.map((e) => e.toCompactJson()).toList(),
     }),
     (err) => serverError(request, err),
   );

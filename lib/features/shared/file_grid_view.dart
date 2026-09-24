@@ -1,10 +1,13 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
+import '../../core/timeline_utils.dart';
 import '../../core/tokens.dart';
 import '../../data/models/file_entry.dart';
 import 'file_thumbnail.dart';
 
-/// 手机/平板通用的文件网格组件（本地/远程复用）。
+/// 手机/平板通用的文件网格组件（本地/远程复用，支持时间轴分组展示）。
 class FileGridView extends StatelessWidget {
   const FileGridView({
     super.key,
@@ -14,9 +17,11 @@ class FileGridView extends StatelessWidget {
     required this.onTap,
     this.onLongPress,
     this.thumbnailResolver,
+    this.thumbnailLoader,
     this.selectedPath,
     this.storageKey,
     this.onDoubleTap,
+    this.groupByTimeline = false,
   });
 
   final List<FileEntry> entries;
@@ -26,6 +31,9 @@ class FileGridView extends StatelessWidget {
 
   /// 解析视频条目为缩略图 URL（仅远程视频需要，服务端生成）。
   final String Function(FileEntry)? thumbnailResolver;
+
+  /// 远程缩略图批量装载器（可选）。
+  final Future<Uint8List?> Function(FileEntry)? thumbnailLoader;
   final bool isRemote;
   final ValueChanged<FileEntry> onTap;
   final ValueChanged<FileEntry>? onLongPress;
@@ -40,42 +48,131 @@ class FileGridView extends StatelessWidget {
   /// 双击列表项回调（媒体直接全屏沉浸式观看）。
   final ValueChanged<FileEntry>? onDoubleTap;
 
+  /// 是否启用时间轴分组展示
+  final bool groupByTimeline;
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final crossAxisCount = (constraints.maxWidth / 140).floor().clamp(2, 8);
-        return GridView.builder(
+        final palette = AppPalette.of(context);
+
+        if (!groupByTimeline) {
+          return GridView.builder(
+            key: storageKey == null
+                ? null
+                : PageStorageKey<String>('grid:$storageKey'),
+            padding: const EdgeInsets.all(AppSpacing.md),
+            physics: const AlwaysScrollableScrollPhysics(),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: crossAxisCount,
+              mainAxisSpacing: AppSpacing.md,
+              crossAxisSpacing: AppSpacing.md,
+              childAspectRatio: 1,
+            ),
+            itemCount: entries.length,
+            itemBuilder: (context, index) {
+              final entry = entries[index];
+              return _FileCell(
+                entry: entry,
+                selected: entry.path == selectedPath,
+                thumbnail: FileThumbnail(
+                  entry: entry,
+                  fileResolver: fileResolver,
+                  isRemote: isRemote,
+                  thumbnailResolver: thumbnailResolver,
+                  thumbnailLoader: thumbnailLoader,
+                  iconSize: 48,
+                  showMeta: true,
+                ),
+                onTap: () => onTap(entry),
+                onDoubleTap: onDoubleTap == null ? null : () => onDoubleTap!(entry),
+                onLongPress: onLongPress == null ? null : () => onLongPress!(entry),
+              );
+            },
+          );
+        }
+
+        final sections = groupEntriesByTimeline(entries);
+        return CustomScrollView(
           key: storageKey == null
               ? null
-              : PageStorageKey<String>('grid:$storageKey'),
-          padding: const EdgeInsets.all(AppSpacing.md),
+              : PageStorageKey<String>('grid_tl:$storageKey'),
           physics: const AlwaysScrollableScrollPhysics(),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: crossAxisCount,
-            mainAxisSpacing: AppSpacing.md,
-            crossAxisSpacing: AppSpacing.md,
-            childAspectRatio: 1,
-          ),
-          itemCount: entries.length,
-          itemBuilder: (context, index) {
-            final entry = entries[index];
-            return _FileCell(
-              entry: entry,
-              selected: entry.path == selectedPath,
-              thumbnail: FileThumbnail(
-                entry: entry,
-                fileResolver: fileResolver,
-                isRemote: isRemote,
-                thumbnailResolver: thumbnailResolver,
-                iconSize: 48,
-                showMeta: true,
+          slivers: [
+            for (final section in sections) ...[
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    AppSpacing.md,
+                    AppSpacing.lg,
+                    AppSpacing.xs,
+                  ),
+                  child: Row(
+                    children: [
+                      Text(
+                        section.title,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: palette.text,
+                            ),
+                      ),
+                      const SizedBox(width: AppSpacing.xs),
+                      Text(
+                        '(${section.entries.length})',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: palette.muted,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              onTap: () => onTap(entry),
-              onDoubleTap: onDoubleTap == null ? null : () => onDoubleTap!(entry),
-              onLongPress: onLongPress == null ? null : () => onLongPress!(entry),
-            );
-          },
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md,
+                  vertical: AppSpacing.xs,
+                ),
+                sliver: SliverGrid(
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: crossAxisCount,
+                    mainAxisSpacing: AppSpacing.md,
+                    crossAxisSpacing: AppSpacing.md,
+                    childAspectRatio: 1,
+                  ),
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      final entry = section.entries[index];
+                      return _FileCell(
+                        entry: entry,
+                        selected: entry.path == selectedPath,
+                        thumbnail: FileThumbnail(
+                          entry: entry,
+                          fileResolver: fileResolver,
+                          isRemote: isRemote,
+                          thumbnailResolver: thumbnailResolver,
+                          thumbnailLoader: thumbnailLoader,
+                          iconSize: 48,
+                          showMeta: true,
+                        ),
+                        onTap: () => onTap(entry),
+                        onDoubleTap: onDoubleTap == null
+                            ? null
+                            : () => onDoubleTap!(entry),
+                        onLongPress: onLongPress == null
+                            ? null
+                            : () => onLongPress!(entry),
+                      );
+                    },
+                    childCount: section.entries.length,
+                  ),
+                ),
+              ),
+            ],
+            const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg)),
+          ],
         );
       },
     );

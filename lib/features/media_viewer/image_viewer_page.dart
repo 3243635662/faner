@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
@@ -43,6 +44,10 @@ class _ImageViewerPageState extends State<ImageViewerPage> {
     _pageController = PageController(initialPage: widget.initialIndex);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _loadAspectRatio(_currentIndex);
+    // 首屏立即预加载相邻图片，下次滑动时即刷小窗。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _prefetchNeighbors(_currentIndex);
+    });
   }
 
   @override
@@ -58,11 +63,15 @@ class _ImageViewerPageState extends State<ImageViewerPage> {
     final source = widget.items[index];
     final ImageProvider<Object> provider = switch (source) {
       LocalMediaSource(:final path) => FileImage(File(path)),
-      RemoteMediaSource(:final url) => NetworkImage(url),
+      RemoteMediaSource(:final url) => CachedNetworkImageProvider(url),
     };
     final stream = provider.resolve(const ImageConfiguration());
-    stream.addListener(ImageStreamListener(
+    late final ImageStreamListener listener;
+    void release() => stream.removeListener(listener);
+    listener = ImageStreamListener(
       (info, _) {
+        // 尺寸拿到即移除监听，避免 ImageStream 持有 State 造成泄漏。
+        release();
         if (!mounted) return;
         if (info.image.width > 0 && info.image.height > 0) {
           setState(() {
@@ -70,8 +79,23 @@ class _ImageViewerPageState extends State<ImageViewerPage> {
           });
         }
       },
-      onError: (_, _) {},
-    ));
+      onError: (_, _) => release(),
+    );
+    stream.addListener(listener);
+  }
+
+  /// 预加载 [index] 左右各 2 张图片到系统图片缓存，滑动时即时显示。
+  void _prefetchNeighbors(int index) {
+    const radius = 2;
+    for (var i = index - radius; i <= index + radius; i++) {
+      if (i == index || i < 0 || i >= widget.items.length) continue;
+      final source = widget.items[i];
+      final ImageProvider<Object> provider = switch (source) {
+        LocalMediaSource(:final path) => FileImage(File(path)),
+        RemoteMediaSource(:final url) => CachedNetworkImageProvider(url),
+      };
+      precacheImage(provider, context).ignore();
+    }
   }
 
   void _onTapUp(
@@ -114,7 +138,8 @@ class _ImageViewerPageState extends State<ImageViewerPage> {
                 return PhotoViewGalleryPageOptions(
                   imageProvider: switch (source) {
                     LocalMediaSource(:final path) => FileImage(File(path)),
-                    RemoteMediaSource(:final url) => NetworkImage(url),
+                    RemoteMediaSource(:final url) =>
+                      CachedNetworkImageProvider(url),
                   },
                   heroAttributes:
                       PhotoViewHeroAttributes(tag: 'img_${source.heroTag}'),
@@ -128,6 +153,7 @@ class _ImageViewerPageState extends State<ImageViewerPage> {
               onPageChanged: (index) {
                 setState(() => _currentIndex = index);
                 _loadAspectRatio(index);
+                _prefetchNeighbors(index);
               },
               backgroundDecoration: const BoxDecoration(color: Colors.black),
               loadingBuilder: (context, progress) =>

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 
@@ -41,13 +42,12 @@ class _ImageViewState extends State<ImageView> {
           fit: BoxFit.contain,
           errorBuilder: (_, _, _) => _error(palette),
         ),
-      RemoteMediaSource(:final url) => Image.network(
-          url,
+      RemoteMediaSource(:final url) => CachedNetworkImage(
+          imageUrl: url,
           fit: BoxFit.contain,
-          loadingBuilder: (_, child, progress) => progress == null
-              ? child
-              : const Center(child: CircularProgressIndicator()),
-          errorBuilder: (_, _, _) => _error(palette),
+          placeholder: (_, _) =>
+              const Center(child: CircularProgressIndicator()),
+          errorWidget: (_, _, _) => _error(palette),
         ),
     };
     final viewer = GestureDetector(

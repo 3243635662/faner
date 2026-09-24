@@ -25,3 +25,17 @@ String formatDateTime(DateTime dt) {
   }
   return '${dt.year}-$md $hm';
 }
+
+/// 人类可读的字节大小格式化（如 "12.5 MB"、"450 KB"）。
+String formatBytes(int bytes) {
+  if (bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  double value = bytes.toDouble();
+  int i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i++;
+  }
+  return '${value.toStringAsFixed(value >= 100 || i == 0 ? 0 : 1)} ${units[i]}';
+}
+

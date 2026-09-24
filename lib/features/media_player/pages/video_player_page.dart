@@ -76,7 +76,8 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       // 从双栏进来的"全屏"语义 = 回到双栏；先还原 UI 再 pop，
       // 确保返回双栏界面时系统栏已经显示出来。
       await SystemUiService.restore();
-      if (context.mounted && context.canPop()) context.pop();
+      if (!mounted) return;
+      if (context.canPop()) context.pop();
       return;
     }
     final next = !_fullscreen;

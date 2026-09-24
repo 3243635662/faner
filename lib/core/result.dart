@@ -19,11 +19,23 @@ class Ok<T> extends Result<T> {
 }
 
 class Err<T> extends Result<T> {
-  const Err(this.message);
+  const Err(this.message, {this.code});
 
   final String message;
+
+  /// 机器可读的错误码（如 `unauthorized`），供上层做分支处理；
+  /// 普通展示用 [message] 即可。
+  final String? code;
 
   @override
   R fold<R>(R Function(T value) onOk, R Function(String message) onErr) =>
       onErr(message);
+}
+
+/// 错误码常量。
+class ErrorCodes {
+  ErrorCodes._();
+
+  /// 需要共享口令 / 口令不正确（HTTP 401）。
+  static const String unauthorized = 'unauthorized';
 }

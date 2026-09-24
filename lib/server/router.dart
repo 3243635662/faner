@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'handlers/events_handler.dart';
 import 'handlers/file_handler.dart';
 import 'handlers/info_handler.dart';
 import 'handlers/list_handler.dart';
@@ -15,9 +16,22 @@ class Router {
 
   Future<void> handle(HttpRequest request) async {
     try {
-      switch (request.uri.path) {
-        case '/api/info':
-          await handleInfo(request, ctx);
+      ctx.activity?.touch();
+      final path = request.uri.path;
+
+      // `/api/info` 公开：用于连通性校验，以及连接前探测「是否需要口令」。
+      if (path == '/api/info') {
+        await handleInfo(request, ctx);
+        return;
+      }
+
+      // 其余接口统一鉴权（口令为空时直接放行）。
+      if (!ctx.isAuthorized(request)) {
+        unauthorized(request);
+        return;
+      }
+
+      switch (path) {
         case '/api/list':
           await handleList(request, ctx);
         case '/api/search':
@@ -26,6 +40,10 @@ class Router {
           await handleFile(request, ctx);
         case '/api/thumbnail':
           await handleThumbnail(request, ctx);
+        case '/api/thumbs':
+          await handleThumbnails(request, ctx);
+        case '/api/events':
+          await handleEvents(request, ctx);
         default:
           notFound(request);
       }

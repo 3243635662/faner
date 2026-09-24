@@ -6,12 +6,16 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/constants.dart';
 import '../../core/prompts.dart';
+import '../../core/result.dart';
 import '../../core/tokens.dart';
 import '../../data/models/device_info.dart';
+import '../../providers/credentials_provider.dart';
+import '../../providers/device_health_provider.dart';
 import '../../providers/discovery_provider.dart';
 import '../../providers/server_provider.dart';
 import '../../providers/services_provider.dart';
 import '../shared/empty_state.dart';
+import 'auth_prompt.dart';
 
 class DevicesPage extends ConsumerWidget {
   const DevicesPage({super.key});
@@ -44,6 +48,7 @@ class DevicesPage extends ConsumerWidget {
         subtitle: '确保两台设备在同一 Wi-Fi 下，\n或使用「手动连接」输入 IP 地址。',
       );
     }
+    final health = ref.watch(deviceHealthProvider);
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
       itemCount: devices.length,
@@ -51,13 +56,25 @@ class DevicesPage extends ConsumerWidget {
         final d = devices[index];
         return _DeviceCard(
           device: d,
-          onTap: () => context.push('/remote', extra: d),
+          online: health[d.deviceName],
+          onTap: () => _openDevice(context, ref, d),
           onLongPress: d.isManual
               ? () => _confirmRemove(context, ref, d)
               : null,
         );
       },
     );
+  }
+
+  /// 进入前先确保口令校验通过，避免进去只看到一句「服务返回错误（401）」。
+  Future<void> _openDevice(
+    BuildContext context,
+    WidgetRef ref,
+    DeviceInfo device,
+  ) async {
+    final ok = await ensureAuthorized(context, ref, device);
+    if (!ok || !context.mounted) return;
+    context.push('/remote', extra: device);
   }
 
   Future<void> _confirmRemove(
@@ -81,6 +98,8 @@ class DevicesPage extends ConsumerWidget {
     );
     if (ok == true) {
       ref.read(manualDevicesProvider.notifier).remove(device);
+      // 一并清掉该设备保存的共享口令，避免残留
+      ref.read(deviceCredentialsProvider.notifier).remove(device.deviceName);
     }
   }
 
@@ -111,26 +130,32 @@ class DevicesPage extends ConsumerWidget {
       _showSnack(context, 'IP 地址格式不正确');
       return;
     }
-    final device = DeviceInfo(deviceName: ip, ip: ip, port: port, isManual: true);
+    final probeDevice =
+        DeviceInfo(deviceName: ip, ip: ip, port: port, isManual: true);
 
     // 先校验连通性（GET /api/info）
     _showSnack(context, '正在连接…');
-    final client = ref.read(remoteFileClientProvider);
-    final info = await client.fetchInfo(device);
+    final info = await ref.read(remoteFileClientProvider).fetchInfo(probeDevice);
     if (!context.mounted) return;
-    info.fold(
-      (remoteInfo) {
-        final finalDevice = DeviceInfo(
-          deviceName: remoteInfo.deviceName,
+
+    switch (info) {
+      case Ok(:final value):
+        final device = DeviceInfo(
+          deviceName: value.deviceName,
           ip: ip,
           port: port,
           isManual: true,
         );
-        ref.read(manualDevicesProvider.notifier).add(finalDevice);
-        _showSnack(context, '已连接 ${finalDevice.deviceName}');
-      },
-      (err) => _showSnack(context, '连接失败：$err'),
-    );
+        // 对方开启了口令保护：连上前先验证口令
+        if (value.authRequired) {
+          final ok = await ensureAuthorized(context, ref, device);
+          if (!ok || !context.mounted) return;
+        }
+        ref.read(manualDevicesProvider.notifier).add(device);
+        _showSnack(context, '已连接 ${device.deviceName}');
+      case Err(:final message):
+        _showSnack(context, '连接失败：$message');
+    }
   }
 
   static bool _isValidIp(String s) {
@@ -152,11 +177,27 @@ class _DeviceCard extends StatelessWidget {
     required this.device,
     required this.onTap,
     this.onLongPress,
+    this.online,
   });
 
   final DeviceInfo device;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
+
+  /// 在线状态；null 表示尚未探测出结果。
+  final bool? online;
+
+  Color _statusColor(AppPalette palette) => switch (online) {
+        true => palette.green,
+        false => palette.red,
+        null => palette.muted,
+      };
+
+  String get _statusLabel => switch (online) {
+        true => '在线',
+        false => device.isManual ? '手动 · 离线' : '离线',
+        null => '检测中…',
+      };
 
   @override
   Widget build(BuildContext context) {
@@ -208,15 +249,13 @@ class _DeviceCard extends StatelessWidget {
                               width: 8,
                               height: 8,
                               decoration: BoxDecoration(
-                                color: device.isManual
-                                    ? palette.muted
-                                    : palette.green,
+                                color: _statusColor(palette),
                                 shape: BoxShape.circle,
                               ),
                             ),
                             const SizedBox(width: AppSpacing.xs),
                             Text(
-                              device.isManual ? '手动 · 可能离线' : '在线',
+                              _statusLabel,
                               style: AppTypography.caption
                                   .copyWith(color: palette.muted),
                             ),

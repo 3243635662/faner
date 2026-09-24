@@ -63,18 +63,32 @@ class ManualDevicesNotifier extends Notifier<List<DeviceInfo>> {
   }
 }
 
-/// 合并 mDNS 发现结果 + 手动设备，去重排序。
+/// 合并 mDNS 发现结果 + 手动设备。
+///
+/// 以**设备名**为主键：对方 IP 变了（换网 / DHCP 重新分配）时，mDNS 结果里的
+/// 新 IP 会自动覆盖手动记录中的旧 IP，避免一直连旧地址报「连接超时」。
 final deviceListProvider = Provider<List<DeviceInfo>>((ref) {
   final discovered = ref.watch(discoveryProvider).value ?? const <DeviceInfo>[];
   final manual = ref.watch(manualDevicesProvider);
-  final map = <String, DeviceInfo>{};
-  for (final d in discovered) {
-    map['${d.ip}:${d.port}'] = d;
-  }
+
+  final byName = <String, DeviceInfo>{};
   for (final d in manual) {
-    map.putIfAbsent('${d.ip}:${d.port}', () => d);
+    byName[d.deviceName] = d;
   }
-  final list = map.values.toList();
+  for (final d in discovered) {
+    final existing = byName[d.deviceName];
+    byName[d.deviceName] = existing == null
+        ? d
+        : DeviceInfo(
+            deviceName: existing.deviceName,
+            // 用 mDNS 的最新地址覆盖，保留用户手动标记
+            ip: d.ip,
+            port: d.port,
+            isManual: existing.isManual,
+          );
+  }
+
+  final list = byName.values.toList();
   list.sort((a, b) {
     if (a.isManual != b.isManual) return a.isManual ? 1 : -1;
     return a.deviceName.compareTo(b.deviceName);

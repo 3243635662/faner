@@ -45,6 +45,7 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
   EntryType? _filter;
   SortField _sortField = SortField.time;
   bool _ascending = false;
+  bool _groupByTimeline = true;
   bool? _granted;
 
   @override
@@ -357,6 +358,20 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
                 Row(
                   children: [
                     Expanded(child: _filterChips()),
+                    IconButton(
+                      icon: Icon(
+                        LucideIcons.calendar,
+                        size: 20,
+                        color: _groupByTimeline && _sortField == SortField.time
+                            ? AppPalette.of(context).brand
+                            : AppPalette.of(context).muted,
+                      ),
+                      tooltip: _groupByTimeline ? '时间轴分组（开启）' : '时间轴分组（关闭）',
+                      onPressed: () => setState(() {
+                        _groupByTimeline = !_groupByTimeline;
+                        if (_groupByTimeline) _sortField = SortField.time;
+                      }),
+                    ),
                     _sortButton(),
                   ],
                 ),
@@ -566,6 +581,8 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
     ValueChanged<FileEntry>? onLongPress,
   }) {
     final mode = ref.watch(settingsProvider.select((s) => s.viewMode));
+    final useTimeline =
+        _groupByTimeline && !_searching && _sortField == SortField.time;
     if (mode == FileViewMode.list) {
       return FileListView(
         entries: entries,
@@ -573,6 +590,7 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
         isRemote: false,
         selectedPath: selectedPath,
         storageKey: storageKey,
+        groupByTimeline: useTimeline,
         onTap: (e) => _onTapEntry(e, isWide, entries),
         onDoubleTap: (e) => _onDoubleTapEntry(e, isWide, entries),
         onLongPress: onLongPress,
@@ -584,6 +602,7 @@ class _LocalBrowserPageState extends ConsumerState<LocalBrowserPage>
       isRemote: false,
       selectedPath: selectedPath,
       storageKey: storageKey,
+      groupByTimeline: useTimeline,
       onTap: (e) => _onTapEntry(e, isWide, entries),
       onDoubleTap: (e) => _onDoubleTapEntry(e, isWide, entries),
       onLongPress: onLongPress,

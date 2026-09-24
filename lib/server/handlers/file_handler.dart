@@ -63,9 +63,15 @@ void _sendFull(HttpRequest request, File file, int size, String mime) {
   res.headers.contentType = ContentType.parse(mime);
   res.headers.contentLength = size;
   res.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+  res.headers.set(
+    HttpHeaders.cacheControlHeader,
+    'public, max-age=86400',
+  );
   // openRead 流式读取，整文件不落内存
   request.response.addStream(file.openRead()).then((_) {
     request.response.close();
+  }).catchError((_) {
+    // 捕获客户端切页或取消加载时主动断开连接，静默忽略
   });
 }
 
@@ -87,9 +93,15 @@ void _sendRange(
     'bytes $start-$end/$size',
   );
   res.headers.contentLength = length;
+  res.headers.set(
+    HttpHeaders.cacheControlHeader,
+    'public, max-age=86400',
+  );
   // openRead(start, end+1) 只流式读取 [start, end] 区间
   request.response.addStream(file.openRead(start, end + 1)).then((_) {
     request.response.close();
+  }).catchError((_) {
+    // 捕获播放器拖动进度条（seek）时取消前一个 range 请求的断开，静默忽略
   });
 }
 

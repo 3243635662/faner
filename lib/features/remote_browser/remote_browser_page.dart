@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
@@ -8,12 +9,14 @@ import 'package:go_router/go_router.dart';
 import '../../core/file_type.dart';
 import '../../core/file_view_mode.dart';
 import '../../core/responsive.dart';
+import '../../core/result.dart';
 import '../../core/tokens.dart';
 import '../../data/models/device_info.dart';
 import '../../data/models/file_entry.dart';
 import '../../providers/browser_provider.dart';
 import '../../providers/services_provider.dart';
 import '../../providers/settings_provider.dart';
+import '../devices/auth_prompt.dart';
 import '../media_viewer/media_source.dart';
 import '../shared/browser_scaffold.dart';
 import '../shared/detail_panel.dart';
@@ -43,6 +46,11 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
   List<FileEntry>? _searchResults;
   SortField _sortField = SortField.time;
   bool _ascending = false;
+  bool _groupByTimeline = true;
+
+  /// 当前目录的变更事件（SSE）订阅。
+  StreamSubscription<void>? _eventsSub;
+  Timer? _refreshDebounce;
 
   @override
   void initState() {
@@ -50,14 +58,46 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
     // 关键：remotePathProvider 是全局共享的，进入新设备时必须重置到根目录，
     // 否则会沿用上一台设备的残留路径（导致目录不存在 / 一直加载）。
     ref.read(remotePathProvider.notifier).set('');
+    _subscribeEvents(ref.read(remotePathProvider));
   }
 
   @override
   void dispose() {
     _debounce?.cancel();
+    _eventsSub?.cancel();
+    _refreshDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
+
+  /// 订阅远端该目录的变更事件；对方增删改后本页自动刷新。
+  void _subscribeEvents(String path) {
+    _eventsSub?.cancel();
+    _eventsSub = null;
+    final token = ref.read(remoteFileClientProvider).tokenOf(widget.device);
+    _eventsSub = ref
+        .read(eventsClientProvider)
+        .watch(widget.device, path, token: token)
+        .listen(
+          (_) => _scheduleRefresh(),
+          // 连接失败（如未带口令）静默降级为手动刷新
+          onError: (Object _) {},
+        );
+  }
+
+  /// 合并短时间内的多次变更事件，避免批量操作时连续刷新。
+  void _scheduleRefresh() {
+    _refreshDebounce?.cancel();
+    _refreshDebounce = Timer(const Duration(milliseconds: 400), () {
+      if (!mounted) return;
+      ref.invalidate(remoteBrowserProvider);
+    });
+  }
+
+  /// 远程缩略图批量装载（一次往返取回整屏缩略图）。
+  Future<Uint8List?> _loadThumb(FileEntry entry) => ref
+      .read(thumbnailBatchLoaderProvider)
+      .load(widget.device, entry.path, entry.modifiedAt.millisecondsSinceEpoch);
 
   String _url(FileEntry e) =>
       ref.read(remoteFileClientProvider).fileUrl(widget.device, e.path);
@@ -214,6 +254,10 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
   @override
   Widget build(BuildContext context) {
     final path = ref.watch(remotePathProvider);
+    // 切换目录时同步切换变更事件订阅，保证看到的是当前目录的实时状态。
+    ref.listen<String>(remotePathProvider, (_, next) {
+      if (next != path) _subscribeEvents(next);
+    });
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = Responsive.useSplitLayout(context, constraints.maxWidth);
@@ -261,6 +305,23 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
                   Row(
                     children: [
                       Expanded(child: _filterChips()),
+                      IconButton(
+                        icon: Icon(
+                          LucideIcons.calendar,
+                          size: 20,
+                          color:
+                              _groupByTimeline && _sortField == SortField.time
+                                  ? AppPalette.of(context).brand
+                                  : AppPalette.of(context).muted,
+                        ),
+                        tooltip: _groupByTimeline
+                            ? '时间轴分组（开启）'
+                            : '时间轴分组（关闭）',
+                        onPressed: () => setState(() {
+                          _groupByTimeline = !_groupByTimeline;
+                          if (_groupByTimeline) _sortField = SortField.time;
+                        }),
+                      ),
                       _sortButton(),
                     ],
                   ),
@@ -404,7 +465,7 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
       loading: () => mode == FileViewMode.list
           ? const SkeletonList()
           : const SkeletonGrid(),
-      error: (e, _) => _errorView(e.toString()),
+      error: (e, _) => _errorView(e),
     );
   }
 
@@ -415,14 +476,19 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
     String? storageKey,
   }) {
     final mode = ref.watch(settingsProvider.select((s) => s.viewMode));
+    // 仅在按时间排序且非搜索态启用时间轴分组，避免过滤/搜索时分组含义混乱。
+    final useTimeline =
+        _groupByTimeline && !_searching && _sortField == SortField.time;
     if (mode == FileViewMode.list) {
       return FileListView(
         entries: entries,
         fileResolver: _url,
         thumbnailResolver: _thumbUrl,
+        thumbnailLoader: _loadThumb,
         isRemote: true,
         selectedPath: selectedPath,
         storageKey: storageKey,
+        groupByTimeline: useTimeline,
         onTap: (e) => _onTap(e, isWide, entries),
         onDoubleTap: (e) => _onDoubleTapEntry(e, isWide, entries),
       );
@@ -431,9 +497,11 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
       entries: entries,
       fileResolver: _url,
       thumbnailResolver: _thumbUrl,
+      thumbnailLoader: _loadThumb,
       isRemote: true,
       selectedPath: selectedPath,
       storageKey: storageKey,
+      groupByTimeline: useTimeline,
       onTap: (e) => _onTap(e, isWide, entries),
       onDoubleTap: (e) => _onDoubleTapEntry(e, isWide, entries),
     );
@@ -521,11 +589,24 @@ class _RemoteBrowserPageState extends ConsumerState<RemoteBrowserPage> {
   Widget _empty(String message) =>
       EmptyState(icon: LucideIcons.cloud_off, title: message);
 
-  Widget _errorView(String message) {
+  Widget _errorView(Object error) {
+    // 口令保护：直接引导输入，而不是丢一句「服务返回错误（401）」。
+    if (error is BrowserException && error.code == ErrorCodes.unauthorized) {
+      return ErrorView(
+        message: '该设备开启了共享口令，需要验证后才能浏览',
+        onRetry: _authorizeThenRefresh,
+      );
+    }
     return ErrorView(
-      message: message,
+      message: error.toString(),
       onRetry: () => ref.invalidate(remoteBrowserProvider),
     );
+  }
+
+  Future<void> _authorizeThenRefresh() async {
+    final ok = await ensureAuthorized(context, ref, widget.device);
+    if (!mounted || !ok) return;
+    ref.invalidate(remoteBrowserProvider);
   }
 
   void _showSnack(String msg) {

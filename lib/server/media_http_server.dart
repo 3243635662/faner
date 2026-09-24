@@ -9,15 +9,23 @@ import 'server_context.dart';
 
 /// 本机 HTTP 媒体服务器（dart:io HttpServer）。
 class MediaHttpServer {
-  MediaHttpServer({required this.localFileService});
+  MediaHttpServer({required this.localFileService, this.password});
 
   final LocalFileService localFileService;
+
+  /// 共享口令解析器；为空表示不启用鉴权。
+  final String Function()? password;
+
+  final ServerActivity _activity = ServerActivity();
 
   HttpServer? _server;
 
   bool get isRunning => _server != null;
 
   int? get port => _server?.port;
+
+  /// 最近是否有客户端在访问（用于空闲降频省电）。
+  bool get hasRecentClient => _activity.hasRecentClient;
 
   /// 启动服务器，返回实际监听端口。
   Future<int> start({required String deviceName}) async {
@@ -29,6 +37,8 @@ class MediaHttpServer {
       root: root,
       deviceName: deviceName,
       localFileService: localFileService,
+      password: password ?? noPassword,
+      activity: _activity,
     );
     final router = Router(ctx: ctx);
 

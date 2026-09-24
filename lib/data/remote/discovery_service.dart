@@ -32,7 +32,7 @@ class DiscoveryService {
   /// 开始扫描，持续输出发现的设备列表（已过滤本机）。
   Stream<List<DeviceInfo>> discover() {
     _controller = StreamController<List<DeviceInfo>>();
-    _collectMyIps();
+    unawaited(refreshMyIps());
     nsd
         .startDiscovery(
           AppConstants.serviceType,
@@ -85,7 +85,9 @@ class DiscoveryService {
     return parts.length == 4 && parts.every((p) => int.tryParse(p) != null);
   }
 
-  Future<void> _collectMyIps() async {
+  /// 获取本机当前所有活跃 IPv4 地址
+  static Future<Set<String>> getLocalIpv4Addresses() async {
+    final ips = <String>{};
     try {
       final interfaces = await NetworkInterface.list(
         includeLinkLocal: false,
@@ -93,12 +95,20 @@ class DiscoveryService {
       );
       for (final itf in interfaces) {
         for (final a in itf.addresses) {
-          _myIps.add(a.address);
+          ips.add(a.address);
         }
       }
     } catch (_) {
-      // 忽略，仅用于排重
+      // 忽略
     }
+    return ips;
+  }
+
+  Future<void> refreshMyIps() async {
+    final ips = await getLocalIpv4Addresses();
+    _myIps
+      ..clear()
+      ..addAll(ips);
   }
 
   void stopDiscovery() {

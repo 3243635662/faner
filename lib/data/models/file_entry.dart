@@ -1,4 +1,5 @@
 import '../../core/file_type.dart';
+import '../../core/path_utils.dart';
 
 // 项目里的文件/目录数据模型
 /// 文件/目录条目。`path` 为相对于共享根目录的相对路径。
@@ -20,14 +21,26 @@ class FileEntry {
   bool get isFolder => type == EntryType.folder; // 是不是文件夹
 
   // 把服务端 HTTP API 返回的 JSON 转成 FileEntry
-  factory FileEntry.fromJson(Map<String, dynamic> json) => FileEntry(
-    name: json['name'] as String,
-    path: json['path'] as String,
-    // 从类型枚举的值列表中查找 type 属性等于传入字符串的枚举值，并返回它
-    type: EntryType.values.byName(json['type'] as String),
-    sizeBytes: json['sizeBytes'] as int,
-    modifiedAt: DateTime.parse(json['modifiedAt'] as String),
-  );
+  //
+  // 兼容两种线格式：
+  // - 完整格式（搜索接口）：带 `path` 与 ISO8601 的 `modifiedAt`；
+  // - 紧凑格式（列表接口）：省略 `path`（用 [dirPath] + name 拼回），
+  //   时间用 epoch 毫秒的 `mtime`。
+  factory FileEntry.fromJson(Map<String, dynamic> json, {String dirPath = ''}) {
+    final name = json['name'] as String;
+    final rawPath = json['path'] as String?;
+    final mtime = json['mtime'];
+    return FileEntry(
+      name: name,
+      path: rawPath ?? joinRel(dirPath, name),
+      // 从类型枚举的值列表中查找 type 属性等于传入字符串的枚举值，并返回它
+      type: EntryType.values.byName(json['type'] as String),
+      sizeBytes: json['sizeBytes'] as int,
+      modifiedAt: mtime is int
+          ? DateTime.fromMillisecondsSinceEpoch(mtime)
+          : DateTime.parse(json['modifiedAt'] as String),
+    );
+  }
 
   Map<String, dynamic> toJson() => {
     'name': name,
@@ -35,6 +48,15 @@ class FileEntry {
     'type': type.name,
     'sizeBytes': sizeBytes,
     'modifiedAt': modifiedAt.toIso8601String(),
+  };
+
+  /// 列表接口用的紧凑线格式：省掉冗余的 `path`（父目录已随响应下发），
+  /// 时间戳改 epoch 毫秒。
+  Map<String, dynamic> toCompactJson() => {
+    'name': name,
+    'type': type.name,
+    'sizeBytes': sizeBytes,
+    'mtime': modifiedAt.millisecondsSinceEpoch,
   };
 
   /// 人类可读的文件大小。

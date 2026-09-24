@@ -18,6 +18,7 @@ class SettingsState {
     required this.longPressSpeed,
     required this.seekSensitivity,
     required this.rememberProgress,
+    required this.sharePassword,
   });
 
   const SettingsState.initial()
@@ -29,7 +30,8 @@ class SettingsState {
         videoPlayMode = VideoPlayMode.sequential,
         longPressSpeed = 2.0,
         seekSensitivity = SeekSensitivity.standard,
-        rememberProgress = true;
+        rememberProgress = true,
+        sharePassword = '';
 
   final String deviceName;
   final bool serverEnabled;
@@ -50,6 +52,9 @@ class SettingsState {
   /// 是否记住媒体播放进度（视频断点续播）。
   final bool rememberProgress;
 
+  /// 共享口令；为空表示不开启口令保护（同网设备可直接访问）。
+  final String sharePassword;
+
   SettingsState copyWith({
     String? deviceName,
     bool? serverEnabled,
@@ -60,6 +65,7 @@ class SettingsState {
     double? longPressSpeed,
     SeekSensitivity? seekSensitivity,
     bool? rememberProgress,
+    String? sharePassword,
   }) =>
       SettingsState(
         deviceName: deviceName ?? this.deviceName,
@@ -71,6 +77,7 @@ class SettingsState {
         longPressSpeed: longPressSpeed ?? this.longPressSpeed,
         seekSensitivity: seekSensitivity ?? this.seekSensitivity,
         rememberProgress: rememberProgress ?? this.rememberProgress,
+        sharePassword: sharePassword ?? this.sharePassword,
       );
 }
 
@@ -84,6 +91,7 @@ class SettingsNotifier extends Notifier<SettingsState> {
   static const _kLongPressSpeed = 'long_press_speed';
   static const _kSeekSensitivity = 'seek_sensitivity';
   static const _kRememberProgress = 'remember_progress';
+  static const _kSharePassword = 'share_password';
 
   Future<void>? _loaded;
 
@@ -124,6 +132,7 @@ class SettingsNotifier extends Notifier<SettingsState> {
         SeekSensitivity.standard,
       );
       final rememberProgress = prefs.getBool(_kRememberProgress) ?? true;
+      final sharePassword = prefs.getString(_kSharePassword) ?? '';
       final finalName = (name == null || name.isEmpty)
           ? await _defaultDeviceName()
           : name;
@@ -137,6 +146,7 @@ class SettingsNotifier extends Notifier<SettingsState> {
         longPressSpeed: longPressSpeed,
         seekSensitivity: seekSensitivity,
         rememberProgress: rememberProgress,
+        sharePassword: sharePassword,
       );
     } catch (_) {
       state = SettingsState(
@@ -149,6 +159,7 @@ class SettingsNotifier extends Notifier<SettingsState> {
         longPressSpeed: 2.0,
         seekSensitivity: SeekSensitivity.standard,
         rememberProgress: true,
+        sharePassword: '',
       );
     }
   }
@@ -228,6 +239,14 @@ class SettingsNotifier extends Notifier<SettingsState> {
     state = state.copyWith(rememberProgress: value);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kRememberProgress, value);
+  }
+
+  /// 设置共享口令；传空串表示关闭口令保护。
+  Future<void> setSharePassword(String value) async {
+    final password = value.trim();
+    state = state.copyWith(sharePassword: password);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kSharePassword, password);
   }
 }
 

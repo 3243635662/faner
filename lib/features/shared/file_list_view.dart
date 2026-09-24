@@ -1,12 +1,15 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 
 import '../../core/format.dart';
+import '../../core/timeline_utils.dart';
 import '../../core/tokens.dart';
 import '../../data/models/file_entry.dart';
 import 'file_thumbnail.dart';
 
-/// 文件列表视图（列表布局，展示名称 + 大小 + 修改时间）。
+/// 文件列表视图（列表布局，展示名称 + 大小 + 修改时间，支持时间轴分组展示）。
 class FileListView extends StatelessWidget {
   const FileListView({
     super.key,
@@ -16,14 +19,19 @@ class FileListView extends StatelessWidget {
     required this.onTap,
     this.onLongPress,
     this.thumbnailResolver,
+    this.thumbnailLoader,
     this.selectedPath,
     this.storageKey,
     this.onDoubleTap,
+    this.groupByTimeline = false,
   });
 
   final List<FileEntry> entries;
   final String Function(FileEntry) fileResolver;
   final String Function(FileEntry)? thumbnailResolver;
+
+  /// 远程缩略图批量装载器（可选）。
+  final Future<Uint8List?> Function(FileEntry)? thumbnailLoader;
   final bool isRemote;
   final ValueChanged<FileEntry> onTap;
   final ValueChanged<FileEntry>? onLongPress;
@@ -38,34 +46,115 @@ class FileListView extends StatelessWidget {
   /// 双击列表项回调（媒体直接全屏沉浸式观看）。
   final ValueChanged<FileEntry>? onDoubleTap;
 
+  /// 是否启用时间轴分组展示
+  final bool groupByTimeline;
+
   @override
   Widget build(BuildContext context) {
     final palette = AppPalette.of(context);
-    return ListView.separated(
+
+    if (!groupByTimeline) {
+      return ListView.separated(
+        key: storageKey == null
+            ? null
+            : PageStorageKey<String>('list:$storageKey'),
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+        physics: const AlwaysScrollableScrollPhysics(),
+        itemCount: entries.length,
+        separatorBuilder: (_, _) => Divider(height: 1, color: palette.line),
+        itemBuilder: (context, index) {
+          final entry = entries[index];
+          return _FileListTile(
+            entry: entry,
+            selected: entry.path == selectedPath,
+            thumbnail: FileThumbnail(
+              entry: entry,
+              fileResolver: fileResolver,
+              isRemote: isRemote,
+              thumbnailResolver: thumbnailResolver,
+              thumbnailLoader: thumbnailLoader,
+              iconSize: 40,
+            ),
+            onTap: () => onTap(entry),
+            onDoubleTap: onDoubleTap == null ? null : () => onDoubleTap!(entry),
+            onLongPress: onLongPress == null ? null : () => onLongPress!(entry),
+          );
+        },
+      );
+    }
+
+    final sections = groupEntriesByTimeline(entries);
+    return CustomScrollView(
       key: storageKey == null
           ? null
-          : PageStorageKey<String>('list:$storageKey'),
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+          : PageStorageKey<String>('list_tl:$storageKey'),
       physics: const AlwaysScrollableScrollPhysics(),
-      itemCount: entries.length,
-      separatorBuilder: (_, _) => Divider(height: 1, color: palette.line),
-      itemBuilder: (context, index) {
-        final entry = entries[index];
-        return _FileListTile(
-          entry: entry,
-          selected: entry.path == selectedPath,
-          thumbnail: FileThumbnail(
-            entry: entry,
-            fileResolver: fileResolver,
-            isRemote: isRemote,
-            thumbnailResolver: thumbnailResolver,
-            iconSize: 40,
+      slivers: [
+        for (final section in sections) ...[
+          SliverToBoxAdapter(
+            child: Container(
+              color: palette.panel,
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.md,
+                AppSpacing.lg,
+                AppSpacing.xs,
+              ),
+              child: Row(
+                children: [
+                  Text(
+                    section.title,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: palette.text,
+                        ),
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  Text(
+                    '(${section.entries.length})',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: palette.muted,
+                        ),
+                  ),
+                ],
+              ),
+            ),
           ),
-          onTap: () => onTap(entry),
-          onDoubleTap: onDoubleTap == null ? null : () => onDoubleTap!(entry),
-          onLongPress: onLongPress == null ? null : () => onLongPress!(entry),
-        );
-      },
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) {
+                final entry = section.entries[index];
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _FileListTile(
+                      entry: entry,
+                      selected: entry.path == selectedPath,
+                      thumbnail: FileThumbnail(
+                        entry: entry,
+                        fileResolver: fileResolver,
+                        isRemote: isRemote,
+                        thumbnailResolver: thumbnailResolver,
+                        thumbnailLoader: thumbnailLoader,
+                        iconSize: 40,
+                      ),
+                      onTap: () => onTap(entry),
+                      onDoubleTap:
+                          onDoubleTap == null ? null : () => onDoubleTap!(entry),
+                      onLongPress:
+                          onLongPress == null ? null : () => onLongPress!(entry),
+                    ),
+                    if (index < section.entries.length - 1)
+                      Divider(height: 1, color: palette.line),
+                  ],
+                );
+              },
+              childCount: section.entries.length,
+            ),
+          ),
+        ],
+        const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg)),
+      ],
     );
   }
 }

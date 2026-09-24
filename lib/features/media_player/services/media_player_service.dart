@@ -10,7 +10,15 @@ import '../models/media_item.dart';
 /// 将来更换播放内核（或同时支持多内核）只需重写这一个文件。
 class MediaPlayerService {
   MediaPlayerService() {
-    _player = mk.Player();
+    _player = mk.Player(
+      configuration: const mk.PlayerConfiguration(
+        // 开启 128MB 内存缓冲区，挂载底层 mpv demuxer 预读缓存，抗弱网/Wi-Fi抖动
+        bufferSize: 128 * 1024 * 1024,
+        libass: false,
+        logLevel: mk.MPVLogLevel.warn,
+      ),
+    );
+    // 屏蔽不必要的 mpv 日志，阶段性效果局限于 PlayerConfiguration。
     videoController = mkv.VideoController(
       _player,
       // 默认即硬件加速，这里显式声明，避免以后被误改成软件解码。

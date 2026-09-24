@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/auth.dart';
+import '../../core/cache_manager.dart';
 import '../../core/constants.dart';
+import '../../core/format.dart';
 import '../../core/prompts.dart';
 import '../../core/seek_sensitivity.dart';
 import '../../core/tokens.dart';
@@ -131,6 +134,47 @@ class SettingsPage extends ConsumerWidget {
                 ),
                 onTap: () => _editDeviceName(context, ref, settings.deviceName),
               ),
+              _divider(palette),
+              _SettingsTile(
+                icon: LucideIcons.lock,
+                iconColor: palette.green,
+                title: '共享密码',
+                subtitle: settings.sharePassword.isEmpty
+                    ? '未设置 · 同网设备可直接访问本机文件'
+                    : '已开启 · 对方连接本机时需输入口令',
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.sm + 2,
+                        vertical: AppSpacing.xs,
+                      ),
+                      decoration: BoxDecoration(
+                        color: palette.panel2,
+                        borderRadius: BorderRadius.circular(AppRadius.sm),
+                      ),
+                      child: Text(
+                        settings.sharePassword.isEmpty ? '未设置' : '已设置',
+                        style: AppTypography.caption.copyWith(
+                          color: settings.sharePassword.isEmpty
+                              ? palette.muted
+                              : palette.green,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.xs),
+                    Icon(
+                      LucideIcons.chevron_right,
+                      size: 18,
+                      color: palette.muted,
+                    ),
+                  ],
+                ),
+                onTap: () =>
+                    _editSharePassword(context, ref, settings.sharePassword),
+              ),
             ],
           ),
 
@@ -221,8 +265,8 @@ class SettingsPage extends ConsumerWidget {
           // 存储与系统
           // -------------------------------------------------------------------
           const _SettingsSectionHeader(
-            title: '系统权限',
-            icon: LucideIcons.shield_check,
+            title: '存储与权限',
+            icon: LucideIcons.hard_drive,
           ),
           _SettingsCard(
             children: [
@@ -240,6 +284,8 @@ class SettingsPage extends ConsumerWidget {
                   }
                 },
               ),
+              _divider(palette),
+              const _CacheTile(),
             ],
           ),
 
@@ -346,6 +392,38 @@ class SettingsPage extends ConsumerWidget {
       await ref.read(serverControllerProvider.notifier).stop();
       await ref.read(serverControllerProvider.notifier).start();
     }
+  }
+
+  Future<void> _editSharePassword(
+    BuildContext context,
+    WidgetRef ref,
+    String current,
+  ) async {
+    final value = await showTextPrompt(
+      context,
+      title: '共享密码',
+      hint: '留空表示关闭口令保护',
+      initial: current,
+      confirmLabel: '保存',
+      validator: (v) {
+        final p = v.trim();
+        if (p.isEmpty) return null; // 允许留空以关闭口令
+        if (p.length < minPasswordLength) {
+          return '至少 $minPasswordLength 位';
+        }
+        return null;
+      },
+    );
+    if (value == null) return;
+    await ref.read(settingsProvider.notifier).setSharePassword(value);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          value.trim().isEmpty ? '已关闭共享口令保护' : '已开启共享口令保护',
+        ),
+      ),
+    );
   }
 
   Future<void> _clearResume(BuildContext context) async {
@@ -657,3 +735,77 @@ class _PermissionStatus extends ConsumerWidget {
     );
   }
 }
+
+class _CacheTile extends ConsumerWidget {
+  const _CacheTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final palette = AppPalette.of(context);
+    final cacheState = ref.watch(cacheSizeProvider);
+
+    final String sizeText = cacheState.when(
+      data: (bytes) => formatBytes(bytes),
+      loading: () => '计算中...',
+      error: (_, _) => '未知',
+    );
+
+    return _SettingsTile(
+      icon: LucideIcons.trash,
+      iconColor: palette.sky,
+      title: '媒体与网络缓存',
+      subtitle: '包括缩略图与网络原图缓存（当前：$sizeText）',
+      trailing: TextButton(
+        onPressed: cacheState.isLoading
+            ? null
+            : () => _handleClear(context, ref, cacheState.value ?? 0),
+        child: const Text('清理'),
+      ),
+      onTap: cacheState.isLoading
+          ? null
+          : () => _handleClear(context, ref, cacheState.value ?? 0),
+    );
+  }
+
+  Future<void> _handleClear(
+    BuildContext context,
+    WidgetRef ref,
+    int currentBytes,
+  ) async {
+    if (currentBytes <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('当前暂无需要清理的缓存')),
+      );
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清理缓存'),
+        content: Text(
+          '确定要清空 ${formatBytes(currentBytes)} 的媒体缓存吗？\n'
+          '清理后缩略图和图片将在浏览时按需重新加载。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('确认清理'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    final clearedBytes = await ref.read(cacheSizeProvider.notifier).clear();
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已成功释放 ${formatBytes(clearedBytes)} 缓存空间')),
+      );
+    }
+  }
+}
+
